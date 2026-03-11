@@ -82,6 +82,8 @@ export default function FinanceX() {
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Cargando nube...");
   const STORAGE_KEY = "financex_app_data_v1";
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
+  const [canInstallApp, setCanInstallApp] = useState(false);
 
   // Historial de días: { [fecha]: { ventas: [...], gastos: [...] } }
   const [historial, setHistorial] = useState({});
@@ -247,6 +249,35 @@ export default function FinanceX() {
       cancelled = true;
     };
   }, [historial, mesesGuardados, conteo, isFirestoreReady, STORAGE_KEY]);
+
+  useEffect(() => {
+    const onBeforeInstall = (event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event);
+      setCanInstallApp(true);
+    };
+
+    const onInstalled = () => {
+      setCanInstallApp(false);
+      setDeferredInstallPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  const instalarApp = async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    setCanInstallApp(false);
+    setDeferredInstallPrompt(null);
+  };
 
   // ── Acciones ──────────────────────────────────────────────────────────────
   const guardarVenta = () => {
@@ -1746,6 +1777,14 @@ export default function FinanceX() {
           <span className="text-xs text-gray-500 ml-2">{syncStatus}</span>
         </div>
         <div className="flex items-center gap-3">
+          {canInstallApp && (
+            <button
+              onClick={instalarApp}
+              className="text-xs text-emerald-300 hover:text-emerald-200 border border-emerald-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              Instalar App
+            </button>
+          )}
           <button
             onClick={reiniciarTodo}
             className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
