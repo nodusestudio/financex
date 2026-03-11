@@ -5,6 +5,16 @@ import * as XLSX from "xlsx";
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 const $ = (n) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n || 0);
+const formatMoneyInput = (v) => {
+  if (v === "" || v === null || typeof v === "undefined") return "";
+  const n = +v || 0;
+  if (!n) return "";
+  return `$ ${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(n)}`;
+};
+const parseMoneyInput = (raw) => {
+  const clean = String(raw || "").replace(/[^\d]/g, "");
+  return clean ? +clean : 0;
+};
 const uid = () => Math.random().toString(36).slice(2);
 const todayStr = () => new Date().toISOString().split("T")[0];
 const nowStr   = () => new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
@@ -1086,6 +1096,7 @@ export default function FinanceX() {
     // Ingresos
     const [rowsI, setRowsI] = useState(INIT_ROWS());
     const [fechaI, setFechaI] = useState(todayStr());
+    const [panelOpen, setPanelOpen] = useState({ Ingresos: true, Egresos: true });
     const updI = (id,k,v) => setRowsI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addI = () => setRowsI(r=>[...r, EROW(r.length)]);
     const delI = (id) => setRowsI(r=>r.filter(x=>x.id!==id));
@@ -1172,6 +1183,9 @@ export default function FinanceX() {
     const totG = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,mesEntradas.flatMap(d=>d.gastos).filter(g=>g.caja===m.key).reduce((a,g)=>a+(+g.monto||0),0)])),[mesEntradas]);
 
     const fmtK = n => $(n || 0);
+
+    const togglePanel = (label) =>
+      setPanelOpen((p) => ({ ...p, [label]: !p[label] }));
 
     const guardarConteoNaranja = () => {
       const next = { ...conteo };
@@ -1290,9 +1304,17 @@ export default function FinanceX() {
               ].map(cfg => (
                 <div key={cfg.label} className="flex-1 min-w-0">
                   <div className="rounded-t-xl border border-gray-700 border-b-0 px-2 py-1.5 bg-gray-800 flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider" style={{color:cfg.color}}>{cfg.label}</span>
+                    <button
+                      onClick={() => togglePanel(cfg.label)}
+                      className="flex items-center gap-1"
+                    >
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{color:cfg.color}}>{cfg.label}</span>
+                      <Ic d={panelOpen[cfg.label] ? ICONS.up : ICONS.down} s={10} c={cfg.color} />
+                    </button>
                     {cfg.total > 0 && <span className="text-xs font-mono" style={{color:cfg.color}}>{$(cfg.total)}</span>}
                   </div>
+                  {panelOpen[cfg.label] && (
+                  <>
                   <div className="border border-gray-700 rounded-b-xl overflow-hidden">
                     <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
                       <colgroup>
@@ -1328,10 +1350,12 @@ export default function FinanceX() {
                                 </td>
                               )}
                               <td className="px-0.5 py-0.5 relative">
-                                <input type="number" inputMode="numeric"
+                                <input type="text" inputMode="numeric"
                                   className="w-full bg-transparent font-mono text-right focus:outline-none placeholder-gray-700"
                                   style={{fontSize:"10px",color:r.monto?cfg.montoColor:undefined}}
-                                  placeholder="0" value={r.monto} onChange={e=>cfg.upd(r.id,"monto",e.target.value)}/>
+                                  placeholder="$ 0"
+                                  value={formatMoneyInput(r.monto)}
+                                  onChange={e=>cfg.upd(r.id,"monto",parseMoneyInput(e.target.value))}/>
                                 <button onClick={()=>cfg.del(r.id)}
                                   className="absolute right-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all pr-0.5">
                                   <Ic d={ICONS.trash} s={9}/>
@@ -1367,6 +1391,8 @@ export default function FinanceX() {
                   <button onClick={cfg.add} className="w-full mt-1 text-gray-600 hover:text-gray-400 border border-gray-700/50 py-1 rounded-lg transition-colors flex items-center justify-center gap-1" style={{fontSize:"10px"}}>
                     <Ic d={ICONS.plus} s={10}/> fila
                   </button>
+                  </>
+                  )}
                 </div>
               ))}
             </div>
@@ -1417,10 +1443,12 @@ export default function FinanceX() {
                             value={r.concepto} onChange={e=>updGI(r.id,"concepto",e.target.value)}/>
                         </td>
                         <td className="px-0.5 py-0.5 relative">
-                          <input type="number" inputMode="numeric"
+                          <input type="text" inputMode="numeric"
                             className="w-full bg-transparent font-mono text-right focus:outline-none placeholder-gray-700"
                             style={{fontSize:"10px", color:r.monto?"#fb923c":undefined}}
-                            placeholder="0" value={r.monto} onChange={e=>updGI(r.id,"monto",e.target.value)}/>
+                            placeholder="$ 0"
+                            value={formatMoneyInput(r.monto)}
+                            onChange={e=>updGI(r.id,"monto",parseMoneyInput(e.target.value))}/>
                         </td>
                       </tr>
                     ))}
@@ -1539,14 +1567,13 @@ export default function FinanceX() {
                             return (
                               <td key={m.key} className="border-r border-gray-700/30 last:border-r-0 px-0.5 py-0.5">
                                 <input
-                                  type="number"
+                                  type="text"
                                   inputMode="numeric"
-                                  min="0"
                                   className="w-full bg-transparent text-center font-mono focus:outline-none"
                                   style={{fontSize:"10px", color: val>0?(isIngreso?"#6ee7b7":"#fca5a5"):"#6b7280"}}
-                                  value={val || ""}
-                                  placeholder="0"
-                                  onChange={e => editarMontoDiario(fila.fecha, fila.tipo, m.key, e.target.value)}
+                                  value={formatMoneyInput(val)}
+                                  placeholder="$ 0"
+                                  onChange={e => editarMontoDiario(fila.fecha, fila.tipo, m.key, parseMoneyInput(e.target.value))}
                                 />
                               </td>
                             );
