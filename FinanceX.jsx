@@ -71,6 +71,7 @@ export default function FinanceX() {
   const [tab, setTab] = useState("cajaDiaria");
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Cargando nube...");
+  const STORAGE_KEY = "financex_app_data_v1";
 
   // Historial de días: { [fecha]: { ventas: [...], gastos: [...] } }
   const [historial, setHistorial] = useState({});
@@ -161,22 +162,36 @@ export default function FinanceX() {
 
   useEffect(() => {
     let isActive = true;
+    let localData = null;
 
     const cargarDesdeFirestore = async () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        localData = raw ? JSON.parse(raw) : null;
+        if (localData?.historial) setHistorial(localData.historial);
+        if (localData?.mesesGuardados) setMesesGuardados(localData.mesesGuardados);
+      } catch (error) {
+        console.error("Error leyendo almacenamiento local", error);
+      }
+
       try {
         const snap = await getDoc(doc(db, "financex", "appData"));
         if (!isActive) return;
 
         if (snap.exists()) {
-          const data = snap.data();
-          if (data.historial) setHistorial(data.historial);
-          if (data.mesesGuardados) setMesesGuardados(data.mesesGuardados);
+          const cloud = snap.data();
+          const cloudUpdated = new Date(cloud.updatedAt || 0).getTime();
+          const localUpdated = new Date(localData?.updatedAt || 0).getTime();
+          const selected = cloudUpdated >= localUpdated ? cloud : localData;
+
+          if (selected?.historial) setHistorial(selected.historial);
+          if (selected?.mesesGuardados) setMesesGuardados(selected.mesesGuardados);
         }
 
         setSyncStatus("Sincronizado");
       } catch (error) {
         console.error("Error cargando Firestore", error);
-        if (isActive) setSyncStatus("Error nube");
+        if (isActive) setSyncStatus(localData ? "Guardado local" : "Error nube");
       } finally {
         if (isActive) setIsFirestoreReady(true);
       }
@@ -191,27 +206,34 @@ export default function FinanceX() {
   useEffect(() => {
     if (!isFirestoreReady) return;
 
+    const payload = {
+      historial,
+      mesesGuardados,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error("Error guardando almacenamiento local", error);
+    }
+
     setSyncStatus("Guardando...");
-    const timer = setTimeout(async () => {
+    let cancelled = false;
+    (async () => {
       try {
-        await setDoc(
-          doc(db, "financex", "appData"),
-          {
-            historial,
-            mesesGuardados,
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-        setSyncStatus("Sincronizado");
+        await setDoc(doc(db, "financex", "appData"), payload, { merge: true });
+        if (!cancelled) setSyncStatus("Sincronizado");
       } catch (error) {
         console.error("Error guardando Firestore", error);
-        setSyncStatus("Error nube");
+        if (!cancelled) setSyncStatus("Guardado local");
       }
-    }, 700);
+    })();
 
-    return () => clearTimeout(timer);
-  }, [historial, mesesGuardados, isFirestoreReady]);
+    return () => {
+      cancelled = true;
+    };
+  }, [historial, mesesGuardados, isFirestoreReady, STORAGE_KEY]);
 
   // ── Acciones ──────────────────────────────────────────────────────────────
   const guardarVenta = () => {
