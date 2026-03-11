@@ -1,4 +1,6 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "./src/firebase.js";
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 const $ = (n) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n || 0);
@@ -66,6 +68,8 @@ const btn = (color) => `w-full py-3 rounded-xl text-sm font-semibold transition-
 // ════════════════════════════════════════════════════════════════════════════
 export default function FinanceX() {
   const [tab, setTab] = useState("cajaDiaria");
+  const [isFirestoreReady, setIsFirestoreReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("Cargando nube...");
 
   // Historial de días: { [fecha]: { ventas: [...], gastos: [...] } }
   const HOY = todayStr();
@@ -155,6 +159,60 @@ export default function FinanceX() {
       }, 0),
     [historial]
   );
+
+  useEffect(() => {
+    let isActive = true;
+
+    const cargarDesdeFirestore = async () => {
+      try {
+        const snap = await getDoc(doc(db, "financex", "appData"));
+        if (!isActive) return;
+
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.historial) setHistorial(data.historial);
+          if (data.mesesGuardados) setMesesGuardados(data.mesesGuardados);
+        }
+
+        setSyncStatus("Sincronizado");
+      } catch (error) {
+        console.error("Error cargando Firestore", error);
+        if (isActive) setSyncStatus("Error nube");
+      } finally {
+        if (isActive) setIsFirestoreReady(true);
+      }
+    };
+
+    cargarDesdeFirestore();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isFirestoreReady) return;
+
+    setSyncStatus("Guardando...");
+    const timer = setTimeout(async () => {
+      try {
+        await setDoc(
+          doc(db, "financex", "appData"),
+          {
+            historial,
+            mesesGuardados,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        setSyncStatus("Sincronizado");
+      } catch (error) {
+        console.error("Error guardando Firestore", error);
+        setSyncStatus("Error nube");
+      }
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [historial, mesesGuardados, isFirestoreReady]);
 
   // ── Acciones ──────────────────────────────────────────────────────────────
   const guardarVenta = () => {
@@ -1476,6 +1534,7 @@ export default function FinanceX() {
           <div className="w-6 h-6 bg-blue-600 rounded-lg flex items-center justify-center text-xs font-bold">F</div>
           <span className="text-sm font-bold text-white">FinanceX</span>
           <span className="text-xs text-gray-600 ml-1">{new Date().toLocaleDateString("es-CO", { day:"numeric", month:"short" })}</span>
+          <span className="text-xs text-gray-500 ml-2">{syncStatus}</span>
         </div>
         <div className="text-xs text-gray-500 font-mono">
           Neto: <span className={saldoTotalGlobal >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoTotalGlobal)}</span>
