@@ -1740,7 +1740,7 @@ export default function FinanceX() {
       {/* HEADER */}
       <header className="sticky top-0 z-30 bg-gray-950/95 border-b border-gray-800 px-4 py-3 flex items-center justify-between" style={{ backdropFilter: "blur(10px)" }}>
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 bg-blue-600 rounded-lg flex items-center justify-center text-xs font-bold">F</div>
+          <img src="/Financex.png" alt="FinanceX" className="w-7 h-7 rounded-lg object-cover border border-gray-700" />
           <span className="text-sm font-bold text-white">FinanceX</span>
           <span className="text-xs text-gray-600 ml-1">{new Date().toLocaleDateString("es-CO", { day:"numeric", month:"short" })}</span>
           <span className="text-xs text-gray-500 ml-2">{syncStatus}</span>
