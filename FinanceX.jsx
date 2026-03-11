@@ -77,7 +77,7 @@ export default function FinanceX() {
   const [historial, setHistorial] = useState({});
 
   const conteoInicial = () =>
-    Object.fromEntries([...BILLETES, ...MONEDAS].map(d => [d, 0]));
+    ({ ...Object.fromEntries([...BILLETES, ...MONEDAS].map(d => [d, 0])), extra: 0 });
 
   // Caja menor — independiente
   const [conteo, setConteo] = useState(conteoInicial());
@@ -265,7 +265,7 @@ export default function FinanceX() {
 
   // ── Caja menor ────────────────────────────────────────────────────────────
   const totalMenor = useMemo(() =>
-    [...BILLETES, ...MONEDAS].reduce((a, d) => a + d * (conteo[d] || 0), 0),
+    [...BILLETES, ...MONEDAS].reduce((a, d) => a + d * (conteo[d] || 0), 0) + (+conteo.extra || 0),
     [conteo]
   );
 
@@ -1097,8 +1097,9 @@ export default function FinanceX() {
 
     // Calculadora local billetes/monedas (debajo de ventas por día)
     const DENOMS = [50,100,200,500,1000,2000,5000,10000,20000,50000,100000];
+    const [showFondo, setShowFondo] = useState(false);
     const [conteoLocal, setConteoLocal] = useState(() =>
-      Object.fromEntries(DENOMS.map(d => [d, conteo[d] || 0]))
+      ({ ...Object.fromEntries(DENOMS.map(d => [d, conteo[d] || 0])), extra: conteo.extra || 0 })
     );
     const fmtDenom = n => n>=1000?`$${n/1000}k`:`$${n}`;
     const fmtVal = n => $(n || 0);
@@ -1117,6 +1118,7 @@ export default function FinanceX() {
       setConteoLocal(prev => ({
         ...prev,
         ...Object.fromEntries(DENOMS.map(d => [d, conteo[d] || 0])),
+        extra: conteo.extra || 0,
       }));
     }, [conteo]);
 
@@ -1176,9 +1178,11 @@ export default function FinanceX() {
       [...BILLETES, ...MONEDAS].forEach((d) => {
         next[d] = +conteoLocal[d] || 0;
       });
+      next.extra = +conteoLocal.extra || 0;
       setConteo(next);
       setSavedConteoMsg(true);
       setTimeout(() => setSavedConteoMsg(false), 1200);
+      setShowFondo(false);
     };
 
     const editarMontoDiario = (fecha, tipo, metodo, valor) => {
@@ -1246,6 +1250,12 @@ export default function FinanceX() {
           <span className="text-xs text-gray-500 uppercase tracking-wider font-medium">Fecha</span>
           <input type="date" value={fechaI} onChange={e=>{ setFechaI(e.target.value); setFechaG(e.target.value); }}
             className="bg-transparent text-white text-sm font-semibold focus:outline-none flex-1" />
+          <button
+            onClick={() => setShowFondo(v => !v)}
+            className="text-xs text-orange-300 hover:text-orange-200 border border-orange-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            Fondo: {$(totalMenor)}
+          </button>
           <button
             onClick={() => reiniciarFecha(fechaI)}
             className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
@@ -1614,6 +1624,7 @@ export default function FinanceX() {
             </div>
 
             {/* ── CALCULADORA BILLETES Y MONEDAS ── */}
+            {showFondo && (
             <div className="mt-2 border border-gray-700 rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="border-collapse" style={{tableLayout:"fixed", minWidth:"100%"}}>
@@ -1685,6 +1696,7 @@ export default function FinanceX() {
                 </table>
               </div>
             </div>
+            )}
 
           </div>
         </div>
