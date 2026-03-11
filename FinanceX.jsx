@@ -1107,6 +1107,7 @@ export default function FinanceX() {
     const GI_ROW = (concepto = "") => ({ id: uid(), concepto, monto: "" });
     const initGastosInternos = () => [GI_ROW("Domicilios"), GI_ROW("Turno"), GI_ROW()];
     const [rowsGI, setRowsGI] = useState(initGastosInternos());
+    const [savedConteoMsg, setSavedConteoMsg] = useState(false);
     const updGI = (id,k,v) => setRowsGI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addGI = () => setRowsGI(r=>[...r, GI_ROW()]);
     const limpiarGI = () => setRowsGI(initGastosInternos());
@@ -1176,6 +1177,8 @@ export default function FinanceX() {
         next[d] = +conteoLocal[d] || 0;
       });
       setConteo(next);
+      setSavedConteoMsg(true);
+      setTimeout(() => setSavedConteoMsg(false), 1200);
     };
 
     const editarMontoDiario = (fecha, tipo, metodo, valor) => {
@@ -1673,7 +1676,7 @@ export default function FinanceX() {
                             onClick={guardarConteoNaranja}
                             className="px-1.5 py-0.5 rounded bg-orange-700 hover:bg-orange-600 text-white text-[9px] font-semibold leading-none"
                           >
-                            Guardar
+                            {savedConteoMsg ? "Guardado" : "Guardar"}
                           </button>
                         </div>
                       </td>
