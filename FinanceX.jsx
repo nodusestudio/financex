@@ -1158,6 +1158,14 @@ export default function FinanceX() {
 
     const fmtK = n => $(n || 0);
 
+    const guardarConteoNaranja = () => {
+      const next = { ...conteo };
+      [...BILLETES, ...MONEDAS].forEach((d) => {
+        next[d] = +conteoLocal[d] || 0;
+      });
+      setConteo(next);
+    };
+
     const editarMontoDiario = (fecha, tipo, metodo, valor) => {
       const monto = Math.max(0, +valor || 0);
       setHistorial(h => {
@@ -1652,6 +1660,14 @@ export default function FinanceX() {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+              <div className="px-2 py-2 border-t border-orange-900/40 bg-orange-950/30">
+                <button
+                  onClick={guardarConteoNaranja}
+                  className="w-full py-2 rounded-lg bg-orange-700 hover:bg-orange-600 text-white text-xs font-semibold transition-colors"
+                >
+                  Guardar Conteo
+                </button>
               </div>
             </div>
 
