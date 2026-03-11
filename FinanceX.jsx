@@ -170,6 +170,7 @@ export default function FinanceX() {
         localData = raw ? JSON.parse(raw) : null;
         if (localData?.historial) setHistorial(localData.historial);
         if (localData?.mesesGuardados) setMesesGuardados(localData.mesesGuardados);
+        if (localData?.conteo) setConteo({ ...conteoInicial(), ...localData.conteo });
       } catch (error) {
         console.error("Error leyendo almacenamiento local", error);
       }
@@ -186,6 +187,7 @@ export default function FinanceX() {
 
           if (selected?.historial) setHistorial(selected.historial);
           if (selected?.mesesGuardados) setMesesGuardados(selected.mesesGuardados);
+          if (selected?.conteo) setConteo({ ...conteoInicial(), ...selected.conteo });
         }
 
         setSyncStatus("Sincronizado");
@@ -209,6 +211,7 @@ export default function FinanceX() {
     const payload = {
       historial,
       mesesGuardados,
+      conteo,
       updatedAt: new Date().toISOString(),
     };
 
@@ -233,7 +236,7 @@ export default function FinanceX() {
     return () => {
       cancelled = true;
     };
-  }, [historial, mesesGuardados, isFirestoreReady, STORAGE_KEY]);
+  }, [historial, mesesGuardados, conteo, isFirestoreReady, STORAGE_KEY]);
 
   // ── Acciones ──────────────────────────────────────────────────────────────
   const guardarVenta = () => {
@@ -1094,7 +1097,9 @@ export default function FinanceX() {
 
     // Calculadora local billetes/monedas (debajo de ventas por día)
     const DENOMS = [50,100,200,500,1000,2000,5000,10000,20000,50000,100000];
-    const [conteoLocal, setConteoLocal] = useState(Object.fromEntries(DENOMS.map(d=>[d,0])));
+    const [conteoLocal, setConteoLocal] = useState(() =>
+      Object.fromEntries(DENOMS.map(d => [d, conteo[d] || 0]))
+    );
     const fmtDenom = n => n>=1000?`$${n/1000}k`:`$${n}`;
     const fmtVal = n => $(n || 0);
     const totalConteo = DENOMS.reduce((a,d)=>a+d*(conteoLocal[d]||0),0) + (conteoLocal["extra"]||0);
@@ -1106,6 +1111,13 @@ export default function FinanceX() {
     const addGI = () => setRowsGI(r=>[...r, GI_ROW()]);
     const limpiarGI = () => setRowsGI(initGastosInternos());
     const totalGI = rowsGI.reduce((a,r)=>a+(+r.monto||0),0);
+
+    useEffect(() => {
+      setConteoLocal(prev => ({
+        ...prev,
+        ...Object.fromEntries(DENOMS.map(d => [d, conteo[d] || 0])),
+      }));
+    }, [conteo]);
 
     const registrarTodo = () => {
       const validasI = rowsI.filter(r => +r.monto > 0);
@@ -1654,20 +1666,20 @@ export default function FinanceX() {
                       <td colSpan={DENOMS.length} className="border-r border-orange-900/50 px-2 py-1 text-orange-200 font-bold text-right" style={{fontSize:"9px"}}>
                         TOTAL
                       </td>
-                      <td className="px-1 py-1 text-right font-mono font-bold text-white" style={{fontSize:"12px"}}>
-                        {fmtVal(totalConteo)||"$0"}
+                      <td className="px-1 py-1" style={{fontSize:"12px"}}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span className="font-mono font-bold text-white">{fmtVal(totalConteo)||"$0"}</span>
+                          <button
+                            onClick={guardarConteoNaranja}
+                            className="px-1.5 py-0.5 rounded bg-orange-700 hover:bg-orange-600 text-white text-[9px] font-semibold leading-none"
+                          >
+                            Guardar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   </tbody>
                 </table>
-              </div>
-              <div className="px-2 py-2 border-t border-orange-900/40 bg-orange-950/30">
-                <button
-                  onClick={guardarConteoNaranja}
-                  className="w-full py-2 rounded-lg bg-orange-700 hover:bg-orange-600 text-white text-xs font-semibold transition-colors"
-                >
-                  Guardar Conteo
-                </button>
               </div>
             </div>
 
