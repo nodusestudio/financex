@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
+import * as XLSX from "xlsx";
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 const $ = (n) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n || 0);
@@ -72,39 +73,13 @@ export default function FinanceX() {
   const [syncStatus, setSyncStatus] = useState("Cargando nube...");
 
   // Historial de días: { [fecha]: { ventas: [...], gastos: [...] } }
-  const HOY = todayStr();
-  const AYER = new Date(new Date().setDate(new Date().getDate()-1)).toISOString().split("T")[0];
-  const ANTE = new Date(new Date().setDate(new Date().getDate()-2)).toISOString().split("T")[0];
-  const [historial, setHistorial] = useState({
-    [ANTE]: {
-      ventas: [{ id:"v1", hora:"20:00", fecha:ANTE, concepto:"Ventas del día", efectivo:180000, bancolombia:95000, nequi:60000, bold:0, aliados:0, total:335000 }],
-      gastos: [
-        { id:"g1", hora:"10:00", fecha:ANTE, concepto:"Mercado carnes", monto:85000, caja:"efectivo", categoria:"gasto diario" },
-        { id:"g2", hora:"14:00", fecha:ANTE, concepto:"Papas y verduras", monto:32000, caja:"efectivo", categoria:"gasto diario" },
-        { id:"g3", hora:"16:00", fecha:ANTE, concepto:"Servicio domicilio", monto:15000, caja:"nequi", categoria:"gasto diario" },
-      ]
-    },
-    [AYER]: {
-      ventas: [{ id:"v2", hora:"20:30", fecha:AYER, concepto:"Ventas del día", efectivo:220000, bancolombia:130000, nequi:75000, bold:45000, aliados:0, total:470000 }],
-      gastos: [
-        { id:"g4", hora:"09:00", fecha:AYER, concepto:"Gas propano", monto:55000, caja:"efectivo", categoria:"gasto diario" },
-        { id:"g5", hora:"11:30", fecha:AYER, concepto:"Empaque y servilletas", monto:28000, caja:"bancolombia", categoria:"gasto diario" },
-        { id:"g6", hora:"15:00", fecha:AYER, concepto:"Publicidad redes", monto:40000, caja:"bold", categoria:"gasto diario" },
-      ]
-    },
-    [HOY]: {
-      ventas: [{ id:"v3", hora:"19:45", fecha:HOY, concepto:"Ventas del día", efectivo:150000, bancolombia:80000, nequi:55000, bold:30000, aliados:20000, total:335000 }],
-      gastos: [
-        { id:"g7", hora:"08:00", fecha:HOY, concepto:"Pan y salsas", monto:42000, caja:"efectivo", categoria:"gasto diario" },
-        { id:"g8", hora:"13:00", fecha:HOY, concepto:"Domiciliario", monto:20000, caja:"nequi", categoria:"gasto diario" },
-      ]
-    },
-  });
+  const [historial, setHistorial] = useState({});
+
+  const conteoInicial = () =>
+    Object.fromEntries([...BILLETES, ...MONEDAS].map(d => [d, 0]));
 
   // Caja menor — independiente
-  const [conteo, setConteo] = useState(
-    Object.fromEntries([...BILLETES, ...MONEDAS].map(d => [d, 0]))
-  );
+  const [conteo, setConteo] = useState(conteoInicial());
 
   // Fecha activa en historial
   const [fechaVista, setFechaVista] = useState(todayStr());
@@ -159,6 +134,30 @@ export default function FinanceX() {
       }, 0),
     [historial]
   );
+
+  const reiniciarTodo = () => {
+    const ok = window.confirm("Esto eliminara todos los datos (local y nube). Deseas continuar?");
+    if (!ok) return;
+    setHistorial({});
+    setMesesGuardados({});
+    setConteo(conteoInicial());
+  };
+
+  const reiniciarFecha = (fecha) => {
+    if (!fecha) return;
+    const ok = window.confirm(`Se eliminara toda la informacion del ${fecha}. Continuar?`);
+    if (!ok) return;
+    setHistorial(h => {
+      const next = { ...h };
+      delete next[fecha];
+      return next;
+    });
+    setMesesGuardados(m => {
+      const next = { ...m };
+      delete next[fecha.slice(0, 7)];
+      return next;
+    });
+  };
 
   useEffect(() => {
     let isActive = true;
@@ -513,8 +512,86 @@ export default function FinanceX() {
   const ViewHistorial = () => {
     const [mesDetalle, setMesDetalle] = useState(null);
     const [diaDetalle, setDiaDetalle] = useState(null); // fecha string
+    const [mesExport, setMesExport] = useState(todayStr().slice(0, 7));
 
     const fmtC = n => $(n || 0);
+
+    const toRows = (dias) => {
+      const fechas = Object.keys(dias).sort();
+      const rows = fechas.flatMap(fecha => {
+        const dia = dias[fecha] || { ventas: [], gastos: [] };
+        const ingresos = Object.fromEntries(METODOS.map(m => [
+          m.key,
+          dia.ventas.reduce((a, v) => a + (+v[m.key] || 0), 0),
+        ]));
+        const egresos = Object.fromEntries(METODOS.map(m => [
+          m.key,
+          dia.gastos.filter(g => g.caja === m.key).reduce((a, g) => a + (+g.monto || 0), 0),
+        ]));
+
+        const totalIngresos = METODOS.reduce((a, m) => a + (ingresos[m.key] || 0), 0);
+        const totalEgresos = METODOS.reduce((a, m) => a + (egresos[m.key] || 0), 0);
+
+        return [
+          {
+            Fecha: fecha,
+            Tipo: "Ingresos",
+            Efectivo: ingresos.efectivo || 0,
+            Bancolombia: ingresos.bancolombia || 0,
+            Nequi: ingresos.nequi || 0,
+            Bold: ingresos.bold || 0,
+            Aliados: ingresos.aliados || 0,
+            Total: totalIngresos,
+          },
+          {
+            Fecha: fecha,
+            Tipo: "Egresos",
+            Efectivo: egresos.efectivo || 0,
+            Bancolombia: egresos.bancolombia || 0,
+            Nequi: egresos.nequi || 0,
+            Bold: egresos.bold || 0,
+            Aliados: egresos.aliados || 0,
+            Total: totalEgresos,
+          },
+          {
+            Fecha: fecha,
+            Tipo: "Saldo",
+            Efectivo: (ingresos.efectivo || 0) - (egresos.efectivo || 0),
+            Bancolombia: (ingresos.bancolombia || 0) - (egresos.bancolombia || 0),
+            Nequi: (ingresos.nequi || 0) - (egresos.nequi || 0),
+            Bold: (ingresos.bold || 0) - (egresos.bold || 0),
+            Aliados: (ingresos.aliados || 0) - (egresos.aliados || 0),
+            Total: totalIngresos - totalEgresos,
+          },
+        ];
+      });
+
+      const totalGlobal = rows.reduce((a, r) => a + (r.Tipo === "Saldo" ? +r.Total : 0), 0);
+      rows.push({ Fecha: "", Tipo: "TOTAL GLOBAL", Efectivo: "", Bancolombia: "", Nequi: "", Bold: "", Aliados: "", Total: totalGlobal });
+      return rows;
+    };
+
+    const exportarExcel = (dias, nombreArchivo) => {
+      const rows = toRows(dias);
+      if (!rows.length) return;
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Historial");
+      XLSX.writeFile(wb, `${nombreArchivo}.xlsx`);
+    };
+
+    const exportarMes = () => {
+      const diasMes = Object.fromEntries(
+        Object.entries(historial).filter(([fecha]) => fecha.startsWith(mesExport))
+      );
+      if (!Object.keys(diasMes).length) return;
+      exportarExcel(diasMes, `financex-${mesExport}`);
+    };
+
+    const exportarTotal = () => {
+      if (!Object.keys(historial).length) return;
+      exportarExcel(historial, "financex-total");
+    };
 
     // ── Modal: movimientos de egresos de un día ────────────────────────────
     if (mesDetalle && diaDetalle) {
@@ -681,6 +758,7 @@ export default function FinanceX() {
 
     // ── Libro contable ─────────────────────────────────────────────────────
     const meses = Object.values(mesesGuardados).sort((a,b)=>b.mes.localeCompare(a.mes));
+    const hayMesExport = Object.keys(historial).some(fecha => fecha.startsWith(mesExport));
 
     return (
       <div className="space-y-2">
@@ -689,6 +767,33 @@ export default function FinanceX() {
         <div className="flex items-center justify-between px-1 pb-1">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Libro Contable</span>
           <span className="text-xs text-gray-600">{meses.length} {meses.length===1?"mes":"meses"}</span>
+        </div>
+
+        <div className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5 flex items-center gap-2 flex-wrap">
+          <input
+            type="month"
+            value={mesExport}
+            onChange={e => setMesExport(e.target.value)}
+            className="bg-transparent text-xs text-gray-300 border border-gray-700 rounded-lg px-2 py-1.5"
+          />
+          <button
+            onClick={exportarMes}
+            disabled={!hayMesExport}
+            className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+              hayMesExport ? "text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/20" : "text-gray-600 border-gray-700 cursor-not-allowed"
+            }`}
+          >
+            Descargar Mes Excel
+          </button>
+          <button
+            onClick={exportarTotal}
+            disabled={!Object.keys(historial).length}
+            className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+              Object.keys(historial).length ? "text-blue-300 border-blue-800/60 hover:bg-blue-900/20" : "text-gray-600 border-gray-700 cursor-not-allowed"
+            }`}
+          >
+            Descargar Total Excel
+          </button>
         </div>
 
         {meses.length === 0 ? (
@@ -744,10 +849,16 @@ export default function FinanceX() {
                   </div>
 
                   {/* Botón */}
-                  <div className="px-2 py-3 flex items-center justify-center">
+                  <div className="px-2 py-3 flex flex-col items-center justify-center gap-1.5">
                     <button onClick={()=>setMesDetalle(mg)}
                       className="w-full py-1.5 rounded-lg bg-gray-700 hover:bg-blue-700 text-gray-300 hover:text-white text-xs font-semibold transition-all border border-gray-600 hover:border-blue-600">
                       Ver
+                    </button>
+                    <button
+                      onClick={() => exportarExcel(mg.diasHistorial || {}, `financex-${mg.mes}`)}
+                      className="w-full py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-700 text-gray-300 hover:text-white text-xs font-semibold transition-all border border-gray-600 hover:border-emerald-600"
+                    >
+                      Excel
                     </button>
                   </div>
                 </div>
@@ -1090,6 +1201,12 @@ export default function FinanceX() {
           <span className="text-xs text-gray-500 uppercase tracking-wider font-medium">Fecha</span>
           <input type="date" value={fechaI} onChange={e=>{ setFechaI(e.target.value); setFechaG(e.target.value); }}
             className="bg-transparent text-white text-sm font-semibold focus:outline-none flex-1" />
+          <button
+            onClick={() => reiniciarFecha(fechaI)}
+            className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            Reiniciar Fecha
+          </button>
         </div>
 
         {/* Layout: [ingresos | egresos] | ventas */}
@@ -1536,8 +1653,16 @@ export default function FinanceX() {
           <span className="text-xs text-gray-600 ml-1">{new Date().toLocaleDateString("es-CO", { day:"numeric", month:"short" })}</span>
           <span className="text-xs text-gray-500 ml-2">{syncStatus}</span>
         </div>
-        <div className="text-xs text-gray-500 font-mono">
-          Neto: <span className={saldoTotalGlobal >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoTotalGlobal)}</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={reiniciarTodo}
+            className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            Reiniciar Todo
+          </button>
+          <div className="text-xs text-gray-500 font-mono">
+            Neto: <span className={saldoTotalGlobal >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoTotalGlobal)}</span>
+          </div>
         </div>
       </header>
 
