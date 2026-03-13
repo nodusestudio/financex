@@ -1142,8 +1142,9 @@ export default function FinanceX() {
       }
     }, []);
 
-    // Guardar automáticamente cada cambio en ingresos/egresos
-    useEffect(() => {
+    // Guardado manual de ingresos/egresos
+    const [savedTempMsg, setSavedTempMsg] = useState(false);
+    const guardarTemporal = () => {
       const temp = {
         rowsI,
         rowsG,
@@ -1151,7 +1152,9 @@ export default function FinanceX() {
         fechaG,
       };
       localStorage.setItem(TEMP_FORM_KEY, JSON.stringify(temp));
-    }, [rowsI, rowsG, fechaI, fechaG]);
+      setSavedTempMsg(true);
+      setTimeout(() => setSavedTempMsg(false), 1200);
+    };
 
     // Al registrar, limpiar datos temporales
     const limpiarTempForm = () => {
@@ -1469,11 +1472,20 @@ export default function FinanceX() {
             </div>
 
             {/* Botón Registrar — debajo de ambas tablas, ancho completo */}
-            <button onClick={registrarTodo} disabled={!hayI && !hayG}
-              className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2
-                ${(hayI||hayG) ? "bg-blue-700 hover:bg-blue-600 text-white" : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}`}>
-              <Ic d={ICONS.check} s={15} c={(hayI||hayG)?"#fff":"#4b5563"}/> Registrar
-            </button>
+            <div className="flex gap-2 mt-2">
+              <button onClick={guardarTemporal}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 bg-yellow-700 hover:bg-yellow-600 text-white">
+                <Ic d={ICONS.check} s={15} c="#fff"/> Guardar temporal
+              </button>
+              <button onClick={registrarTodo} disabled={!hayI && !hayG}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2
+                  ${(hayI||hayG) ? "bg-blue-700 hover:bg-blue-600 text-white" : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}`}>
+                <Ic d={ICONS.check} s={15} c={(hayI||hayG)?"#fff":"#4b5563"}/> Registrar
+              </button>
+            </div>
+            {savedTempMsg && (
+              <div className="mt-1 text-xs text-yellow-300 font-mono text-center">Guardado temporal realizado</div>
+            )}
 
             {/* ── GASTOS INTERNOS ── */}
             <div className="mt-1">
