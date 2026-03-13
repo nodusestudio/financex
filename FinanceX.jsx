@@ -1114,6 +1114,53 @@ export default function FinanceX() {
   // VIEW: CAJA DIARIA
   // ════════════════════════════════════════════════════════════════════════
   const ViewCajaDiaria = () => {
+            // Guardado automático temporal en Firebase para gastos internos
+            useEffect(() => {
+              const tempGI = {
+                rowsGI,
+              };
+              setDoc(doc(db, "financex_temp", "gastosInternos"), tempGI, { merge: true });
+            }, [rowsGI]);
+
+            // Restaurar gastos internos desde Firebase al abrir la app
+            useEffect(() => {
+              (async () => {
+                try {
+                  const snap = await getDoc(doc(db, "financex_temp", "gastosInternos"));
+                  if (snap.exists()) {
+                    const tempGI = snap.data();
+                    if (tempGI.rowsGI) setRowsGI(tempGI.rowsGI);
+                  }
+                } catch {}
+              })();
+            }, []);
+        // Guardado automático temporal en Firebase
+        useEffect(() => {
+          const temp = {
+            rowsI,
+            rowsG,
+            fechaI,
+            fechaG,
+          };
+          // Guardar en Firebase (colección temporal)
+          setDoc(doc(db, "financex_temp", "formData"), temp, { merge: true });
+        }, [rowsI, rowsG, fechaI, fechaG]);
+
+        // Restaurar datos temporales desde Firebase al abrir la app
+        useEffect(() => {
+          (async () => {
+            try {
+              const snap = await getDoc(doc(db, "financex_temp", "formData"));
+              if (snap.exists()) {
+                const temp = snap.data();
+                if (temp.rowsI) setRowsI(temp.rowsI);
+                if (temp.rowsG) setRowsG(temp.rowsG);
+                if (temp.fechaI) setFechaI(temp.fechaI);
+                if (temp.fechaG) setFechaG(temp.fechaG);
+              }
+            } catch {}
+          })();
+        }, []);
     // Cada fila arranca con un método diferente (ciclando por METODOS)
     const EROW = (i=0) => ({ id: uid(), caja: METODOS[i % METODOS.length].key, concepto: "", monto: "" });
     const INIT_ROWS = (n=8) => Array.from({length:n}, (_,i) => EROW(i));
@@ -1508,9 +1555,9 @@ export default function FinanceX() {
                   <colgroup><col style={{width:"30%"}}/><col style={{width:"45%"}}/><col style={{width:"25%"}}/></colgroup>
                   <thead>
                     <tr className="bg-gray-800/80">
-                      {["MÉTODO","CONCEPTO","MONTO"].map(h=>(
+                      {"MÉTODO","CONCEPTO","MONTO"}.map(h=>(
                         <th key={h} className="border-b border-r border-gray-700 last:border-r-0 text-left px-1.5 py-1 text-gray-500 font-medium" style={{fontSize:"9px"}}>{h}</th>
-                      ))}
+                      ))
                     </tr>
                   </thead>
                   <tbody>
@@ -1544,9 +1591,23 @@ export default function FinanceX() {
                   </tfoot>
                 </table>
               </div>
-              <button onClick={addGI} className="w-full mt-1 text-gray-600 hover:text-orange-400 border border-gray-700/50 py-1 rounded-lg transition-colors flex items-center justify-center gap-1" style={{fontSize:"10px"}}>
-                <Ic d={ICONS.plus} s={10}/> fila
-              </button>
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => {
+                  // Guardado temporal de gastos internos
+                  setDoc(doc(db, "financex_temp", "gastosInternos"), { rowsGI }, { merge: true });
+                  setSavedConteoMsg(true);
+                  setTimeout(() => setSavedConteoMsg(false), 1200);
+                }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 bg-yellow-700 hover:bg-yellow-600 text-white">
+                  <Ic d={ICONS.check} s={15} c="#fff"/> Guardar temporal
+                </button>
+                <button onClick={addGI} className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 text-gray-600 hover:text-orange-400 border border-gray-700/50" style={{fontSize:"10px"}}>
+                  <Ic d={ICONS.plus} s={10}/> fila
+                </button>
+              </div>
+              {savedConteoMsg && (
+                <div className="mt-1 text-xs text-yellow-300 font-mono text-center">Guardado temporal realizado</div>
+              )}
             </div>
           </div>
 
