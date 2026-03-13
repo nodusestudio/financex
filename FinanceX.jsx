@@ -1799,20 +1799,29 @@ export default function FinanceX() {
 
       <div className="px-2 py-3 mx-auto w-full max-w-7xl">
         <div className="flex gap-3 items-start">
-          {/* TABS LATERAL */}
-          <aside className="w-36 shrink-0 sticky top-[64px]">
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          {/* TABS LATERAL COLAPSABLE */}
+          <aside className={`${sidebarCollapsed ? 'w-16' : 'w-36'} shrink-0 sticky top-[64px] transition-all`}>
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden flex flex-col">
+              <button
+                onClick={() => setSidebarCollapsed(c => !c)}
+                className="w-full flex items-center justify-center py-2 border-b border-gray-800 text-gray-400 hover:text-white transition-colors"
+                style={{ fontSize: '16px' }}
+              >
+                <Ic d={sidebarCollapsed ? ICONS.right : ICONS.left} s={18} />
+              </button>
               {TABS.map(t => (
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`w-full text-left px-3 py-3 text-xs font-semibold transition-all border-l-2 ${
+                  className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-start'} px-3 py-3 text-xs font-semibold transition-all border-l-2 ${
                     tab === t.id
                       ? "border-blue-500 bg-blue-950/40 text-white"
                       : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/70"
                   }`}
+                  style={{ minHeight: '48px' }}
                 >
-                  {t.label}
+                  <Ic d={TAB_ICONS[t.id]} s={18} c={tab === t.id ? '#3b82f6' : '#6b7280'} />
+                  {!sidebarCollapsed && <span className="ml-2">{t.label}</span>}
                 </button>
               ))}
             </div>
