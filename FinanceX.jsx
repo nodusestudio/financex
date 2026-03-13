@@ -48,6 +48,8 @@ const ICONS = {
   right: "M9 18l6-6-6-6",
   up:    "M12 19V5M5 12l7-7 7 7",
   down:  "M12 5v14M19 12l-7 7-7-7",
+  cashRegister: "M4 4h16v2H4V4zm2 2v2h12V6H6zm0 4v8h12v-8H6zm2 2h8v4H8v-4zM8 14v2h8v-2H8z", // caja registradora
+  notebook: "M4 4h12v16H4V4zm2 2v12h8V6H6zm10 0v14H6v2h10V6z", // libreta
 };
 
 const Pill = ({ label, color, bg }) => (
@@ -78,6 +80,7 @@ const btn = (color) => `w-full py-3 rounded-xl text-sm font-semibold transition-
 // APP
 // ════════════════════════════════════════════════════════════════════════════
 export default function FinanceX() {
+    // ...existing code...
   const [tab, setTab] = useState("cajaDiaria");
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Cargando nube...");
@@ -1115,9 +1118,47 @@ export default function FinanceX() {
     const EROW = (i=0) => ({ id: uid(), caja: METODOS[i % METODOS.length].key, concepto: "", monto: "" });
     const INIT_ROWS = (n=8) => Array.from({length:n}, (_,i) => EROW(i));
 
+    // Guardado automático temporal para ingresos y egresos
+    const TEMP_FORM_KEY = "financex_temp_form_v1";
+
     // Egresos
     const [rowsG, setRowsG] = useState(INIT_ROWS());
     const [fechaG, setFechaG] = useState(todayStr());
+    // Ingresos
+    const [rowsI, setRowsI] = useState(INIT_ROWS());
+    const [fechaI, setFechaI] = useState(todayStr());
+
+    // Restaurar datos temporales al abrir la app
+    useEffect(() => {
+      const tempRaw = localStorage.getItem(TEMP_FORM_KEY);
+      if (tempRaw) {
+        try {
+          const temp = JSON.parse(tempRaw);
+          if (temp.rowsI) setRowsI(temp.rowsI);
+          if (temp.rowsG) setRowsG(temp.rowsG);
+          if (temp.fechaI) setFechaI(temp.fechaI);
+          if (temp.fechaG) setFechaG(temp.fechaG);
+        } catch {}
+      }
+    }, []);
+
+    // Guardar automáticamente cada cambio en ingresos/egresos
+    useEffect(() => {
+      const temp = {
+        rowsI,
+        rowsG,
+        fechaI,
+        fechaG,
+      };
+      localStorage.setItem(TEMP_FORM_KEY, JSON.stringify(temp));
+    }, [rowsI, rowsG, fechaI, fechaG]);
+
+    // Al registrar, limpiar datos temporales
+    const limpiarTempForm = () => {
+      localStorage.removeItem(TEMP_FORM_KEY);
+    };
+
+    // Egresos
     const updG = (id,k,v) => setRowsG(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addG = () => setRowsG(r=>[...r, EROW(r.length)]);
     const delG = (id) => setRowsG(r=>r.filter(x=>x.id!==id));
@@ -1125,8 +1166,6 @@ export default function FinanceX() {
     const hayG   = rowsG.some(r=>r.concepto.trim()&&+r.monto>0);
 
     // Ingresos
-    const [rowsI, setRowsI] = useState(INIT_ROWS());
-    const [fechaI, setFechaI] = useState(todayStr());
     const [panelOpen, setPanelOpen] = useState({ Ingresos: true, Egresos: true });
     const updI = (id,k,v) => setRowsI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addI = () => setRowsI(r=>[...r, EROW(r.length)]);
@@ -1184,6 +1223,7 @@ export default function FinanceX() {
       });
       setRowsI(INIT_ROWS());
       setRowsG(INIT_ROWS());
+      limpiarTempForm();
     };
 
     // Tabla derecha: fila ingreso muestra día (ej: "Miércoles"), fila egreso muestra fecha (ej: "11/03")
@@ -1765,6 +1805,14 @@ export default function FinanceX() {
   // ════════════════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════════════════
+  // Estado para colapsar barra lateral
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Iconos personalizados para cada pestaña
+  const TAB_ICONS = {
+    cajaDiaria: ICONS.cashRegister,
+    historial: ICONS.notebook,
+  };
   return (
     <div className="min-h-screen bg-gray-950 text-white" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
 
@@ -1801,27 +1849,27 @@ export default function FinanceX() {
         <div className="flex gap-3 items-start">
           {/* TABS LATERAL COLAPSABLE */}
           <aside className={`${sidebarCollapsed ? 'w-16' : 'w-36'} shrink-0 sticky top-[64px] transition-all`}>
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden flex flex-col">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden flex flex-col shadow-lg">
               <button
                 onClick={() => setSidebarCollapsed(c => !c)}
-                className="w-full flex items-center justify-center py-2 border-b border-gray-800 text-gray-400 hover:text-white transition-colors"
-                style={{ fontSize: '16px' }}
+                className="w-full flex items-center justify-center py-2 border-b border-gray-800 text-gray-400 hover:text-white transition-colors bg-gray-950"
+                style={{ fontSize: '18px' }}
               >
-                <Ic d={sidebarCollapsed ? ICONS.right : ICONS.left} s={18} />
+                <Ic d={sidebarCollapsed ? ICONS.right : ICONS.left} s={20} />
               </button>
               {TABS.map(t => (
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-start'} px-3 py-3 text-xs font-semibold transition-all border-l-2 ${
+                  className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-start'} px-2 py-3 text-sm font-semibold transition-all border-l-4 ${
                     tab === t.id
-                      ? "border-blue-500 bg-blue-950/40 text-white"
+                      ? "border-blue-500 bg-blue-950/60 text-white shadow-md"
                       : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/70"
                   }`}
-                  style={{ minHeight: '48px' }}
+                  style={{ minHeight: '48px', letterSpacing: '0.5px', borderRadius: sidebarCollapsed ? '50%' : '0' }}
                 >
-                  <Ic d={TAB_ICONS[t.id]} s={18} c={tab === t.id ? '#3b82f6' : '#6b7280'} />
-                  {!sidebarCollapsed && <span className="ml-2">{t.label}</span>}
+                  <Ic d={TAB_ICONS[t.id]} s={22} c={tab === t.id ? '#3b82f6' : '#6b7280'} />
+                  {!sidebarCollapsed && <span className="ml-3 font-medium">{t.label}</span>}
                 </button>
               ))}
             </div>
