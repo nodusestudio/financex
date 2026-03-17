@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
+import ViewMetricas from "./src/ViewMetricas.jsx";
 import * as XLSX from "xlsx";
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
@@ -299,7 +300,10 @@ export default function FinanceX() {
   const guardarGasto = () => {
     if (!fGasto.concepto || !fGasto.monto) return;
     const nuevo = { id: uid(), hora: nowStr(), concepto: fGasto.concepto, monto: +fGasto.monto, caja: fGasto.caja, categoria: fGasto.categoria };
-    setHistorial(h => ({ ...h, [TODAY]: { ...diaHoy, gastos: [...diaHoy.gastos, nuevo] } }));
+    setHistorial(h => {
+      const dia = h[TODAY] || { ventas: [], gastos: [] };
+      return { ...h, [TODAY]: { ...dia, gastos: [...dia.gastos, nuevo] } };
+    });
     setFGasto({ concepto: "", monto: "", caja: "efectivo", categoria: "domicilio" });
     setSheetGasto(false);
   };
@@ -324,6 +328,7 @@ export default function FinanceX() {
   const TABS = [
     { id: "cajaDiaria", label: "Caja Diaria" },
     { id: "historial",  label: "Historial"   },
+    { id: "metricas",   label: "Métricas"    },
   ];
 
   // ── Estado gastos diarios (filas dinámicas) ───────────────────────────────
@@ -579,65 +584,40 @@ export default function FinanceX() {
   // VIEW: HISTORIAL — Libro Contable
   // ════════════════════════════════════════════════════════════════════════
   const ViewHistorial = () => {
+    // Estados y hooks al inicio
+    const [mesExport, setMesExport] = useState(todayStr().slice(0, 7));
     const [mesDetalle, setMesDetalle] = useState(null);
     const [diaDetalle, setDiaDetalle] = useState(null); // fecha string
-    const [mesExport, setMesExport] = useState(todayStr().slice(0, 7));
-
     const fmtC = n => $(n || 0);
+    // Única declaración de diasFiltrados, protegida
+    const diasFiltrados = useMemo(() => {
+      if (!historial || typeof historial !== 'object' || !mesExport) return [];
+      return Object.entries(historial)
+        .filter(([fecha]) => typeof mesExport === 'string' && fecha.startsWith(mesExport))
+        .map(([fecha, dia]) => ({ fecha, ...dia }));
+    }, [historial, mesExport]);
+    // Memo para meses
+    const meses = useMemo(() => Object.values(mesesGuardados).sort((a,b)=>b.mes.localeCompare(a.mes)), [mesesGuardados]);
+    // Memo para exportación
+    const hayMesExport = useMemo(() => {
+      if (!mesExport || typeof mesExport !== 'string') return false;
+      return Object.keys(historial).some(fecha => fecha.startsWith(mesExport));
+    }, [historial, mesExport]);
 
+    // Mostrar ingresos y egresos por día
     const toRows = (dias) => {
       const fechas = Object.keys(dias).sort();
-      const rows = fechas.flatMap(fecha => {
+      return fechas.map(fecha => {
         const dia = dias[fecha] || { ventas: [], gastos: [] };
-        const ingresos = Object.fromEntries(METODOS.map(m => [
-          m.key,
-          dia.ventas.reduce((a, v) => a + (+v[m.key] || 0), 0),
-        ]));
-        const egresos = Object.fromEntries(METODOS.map(m => [
-          m.key,
-          dia.gastos.filter(g => g.caja === m.key).reduce((a, g) => a + (+g.monto || 0), 0),
-        ]));
-
-        const totalIngresos = METODOS.reduce((a, m) => a + (ingresos[m.key] || 0), 0);
-        const totalEgresos = METODOS.reduce((a, m) => a + (egresos[m.key] || 0), 0);
-
-        return [
-          {
-            Fecha: fecha,
-            Tipo: "Ingresos",
-            Efectivo: ingresos.efectivo || 0,
-            Bancolombia: ingresos.bancolombia || 0,
-            Nequi: ingresos.nequi || 0,
-            Bold: ingresos.bold || 0,
-            Aliados: ingresos.aliados || 0,
-            Total: totalIngresos,
-          },
-          {
-            Fecha: fecha,
-            Tipo: "Egresos",
-            Efectivo: egresos.efectivo || 0,
-            Bancolombia: egresos.bancolombia || 0,
-            Nequi: egresos.nequi || 0,
-            Bold: egresos.bold || 0,
-            Aliados: egresos.aliados || 0,
-            Total: totalEgresos,
-          },
-          {
-            Fecha: fecha,
-            Tipo: "Saldo",
-            Efectivo: (ingresos.efectivo || 0) - (egresos.efectivo || 0),
-            Bancolombia: (ingresos.bancolombia || 0) - (egresos.bancolombia || 0),
-            Nequi: (ingresos.nequi || 0) - (egresos.nequi || 0),
-            Bold: (ingresos.bold || 0) - (egresos.bold || 0),
-            Aliados: (ingresos.aliados || 0) - (egresos.aliados || 0),
-            Total: totalIngresos - totalEgresos,
-          },
-        ];
+        const ingresos = METODOS.reduce((a, m) => a + dia.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
+        const egresos = METODOS.reduce((a, m) => a + dia.gastos.filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
+        return {
+          fecha,
+          ingresos,
+          egresos,
+          saldo: ingresos - egresos,
+        };
       });
-
-      const totalGlobal = rows.reduce((a, r) => a + (r.Tipo === "Saldo" ? +r.Total : 0), 0);
-      rows.push({ Fecha: "", Tipo: "TOTAL GLOBAL", Efectivo: "", Bancolombia: "", Nequi: "", Bold: "", Aliados: "", Total: totalGlobal });
-      return rows;
     };
 
     const exportarExcel = (dias, nombreArchivo) => {
@@ -826,11 +806,40 @@ export default function FinanceX() {
     }
 
     // ── Libro contable ─────────────────────────────────────────────────────
-    const meses = Object.values(mesesGuardados).sort((a,b)=>b.mes.localeCompare(a.mes));
-    const hayMesExport = Object.keys(historial).some(fecha => fecha.startsWith(mesExport));
+
 
     return (
       <div className="space-y-2">
+        {/* Tabla de registro diario */}
+        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden mb-4">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gray-900">
+                <th className="px-2 py-1 border border-gray-700 text-left">Fecha</th>
+                <th className="px-2 py-1 border border-gray-700 text-right">Ingresos</th>
+                <th className="px-2 py-1 border border-gray-700 text-right">Egresos</th>
+                <th className="px-2 py-1 border border-gray-700 text-right">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diasFiltrados.length === 0 ? (
+                <tr><td colSpan={4} className="py-8 text-center text-gray-600 text-xs">Sin movimientos en este mes</td></tr>
+              ) : diasFiltrados.map(dia => {
+                const ingresos = METODOS.reduce((a, m) => a + (dia.ventas||[]).reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
+                const egresos = METODOS.reduce((a, m) => a + (dia.gastos||[]).filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
+                return (
+                  <tr key={dia.fecha} className="bg-gray-900">
+                    <td className="px-2 py-1 border border-gray-700">{dia.fecha}</td>
+                    <td className="px-2 py-1 border border-gray-700 text-right">${ingresos.toLocaleString()}</td>
+                    <td className="px-2 py-1 border border-gray-700 text-right">${egresos.toLocaleString()}</td>
+                    <td className="px-2 py-1 border border-gray-700 text-right">${(ingresos-egresos).toLocaleString()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {/* Resumen mensual */}
 
         {/* Título */}
         <div className="flex items-center justify-between px-1 pb-1">
@@ -1114,68 +1123,71 @@ export default function FinanceX() {
   // VIEW: CAJA DIARIA
   // ════════════════════════════════════════════════════════════════════════
   const ViewCajaDiaria = () => {
-            // Guardado automático temporal en Firebase para gastos internos
-            useEffect(() => {
-              const tempGI = {
-                rowsGI,
-              };
-              setDoc(doc(db, "financex_temp", "gastosInternos"), tempGI, { merge: true });
-            }, [rowsGI]);
-
-            // Restaurar gastos internos desde Firebase al abrir la app
-            useEffect(() => {
-              (async () => {
-                try {
-                  const snap = await getDoc(doc(db, "financex_temp", "gastosInternos"));
-                  if (snap.exists()) {
-                    const tempGI = snap.data();
-                    if (tempGI.rowsGI) setRowsGI(tempGI.rowsGI);
-                  }
-                } catch {}
-              })();
-            }, []);
-        // Guardado automático temporal en Firebase
-        useEffect(() => {
-          const temp = {
-            rowsI,
-            rowsG,
-            fechaI,
-            fechaG,
-          };
-          // Guardar en Firebase (colección temporal)
-          setDoc(doc(db, "financex_temp", "formData"), temp, { merge: true });
-        }, [rowsI, rowsG, fechaI, fechaG]);
-
-        // Restaurar datos temporales desde Firebase al abrir la app
-        useEffect(() => {
-          (async () => {
-            try {
-              const snap = await getDoc(doc(db, "financex_temp", "formData"));
-              if (snap.exists()) {
-                const temp = snap.data();
-                if (temp.rowsI) setRowsI(temp.rowsI);
-                if (temp.rowsG) setRowsG(temp.rowsG);
-                if (temp.fechaI) setFechaI(temp.fechaI);
-                if (temp.fechaG) setFechaG(temp.fechaG);
-              }
-            } catch {}
-          })();
-        }, []);
-    // Cada fila arranca con un método diferente (ciclando por METODOS)
-    const EROW = (i=0) => ({ id: uid(), caja: METODOS[i % METODOS.length].key, concepto: "", monto: "" });
-    const INIT_ROWS = (n=8) => Array.from({length:n}, (_,i) => EROW(i));
+    // ...existing code...
 
     // Guardado automático temporal para ingresos y egresos
     const TEMP_FORM_KEY = "financex_temp_form_v1";
-
+    // Cada fila arranca con un método diferente (ciclando por METODOS)
+    const EROW = (i=0) => ({ id: uid(), caja: METODOS[i % METODOS.length].key, concepto: "", monto: "" });
+    const INIT_ROWS = (n=8) => Array.from({length:n}, (_,i) => EROW(i));
     // Egresos
     const [rowsG, setRowsG] = useState(INIT_ROWS());
     const [fechaG, setFechaG] = useState(todayStr());
     // Ingresos
     const [rowsI, setRowsI] = useState(INIT_ROWS());
     const [fechaI, setFechaI] = useState(todayStr());
-
-    // Restaurar datos temporales al abrir la app
+    // Gastos internos
+    const GI_ROW = (concepto = "") => ({ id: uid(), concepto, monto: "" });
+    const initGastosInternos = () => [GI_ROW("Domicilios"), GI_ROW("Turno"), GI_ROW()];
+    const [rowsGI, setRowsGI] = useState(initGastosInternos());
+    const [savedConteoMsg, setSavedConteoMsg] = useState(false);
+    // Panel ingresos/egresos
+    const [panelOpen, setPanelOpen] = useState({ Ingresos: true, Egresos: true });
+    // Guardado automático temporal en Firebase para gastos internos
+    useEffect(() => {
+      const tempGI = {
+        rowsGI,
+      };
+      setDoc(doc(db, "financex_temp", "gastosInternos"), tempGI, { merge: true });
+    }, [rowsGI]);
+    // Restaurar gastos internos desde Firebase al abrir la app
+    useEffect(() => {
+      (async () => {
+        try {
+          const snap = await getDoc(doc(db, "financex_temp", "gastosInternos"));
+          if (snap.exists()) {
+            const tempGI = snap.data();
+            if (tempGI.rowsGI) setRowsGI(tempGI.rowsGI);
+          }
+        } catch {}
+      })();
+    }, []);
+    // Guardado automático temporal en Firebase
+    useEffect(() => {
+      const temp = {
+        rowsI,
+        rowsG,
+        fechaI,
+        fechaG,
+      };
+      // Guardar en Firebase (colección temporal)
+      setDoc(doc(db, "financex_temp", "formData"), temp, { merge: true });
+    }, [rowsI, rowsG, fechaI, fechaG]);
+    // Restaurar datos temporales desde Firebase al abrir la app
+    useEffect(() => {
+      (async () => {
+        try {
+          const snap = await getDoc(doc(db, "financex_temp", "formData"));
+          if (snap.exists()) {
+            const temp = snap.data();
+            if (temp.rowsI) setRowsI(temp.rowsI);
+            if (temp.rowsG) setRowsG(temp.rowsG);
+            if (temp.fechaI) setFechaI(temp.fechaI);
+            if (temp.fechaG) setFechaG(temp.fechaG);
+          }
+        } catch {}
+      })();
+    }, []);
     useEffect(() => {
       const tempRaw = localStorage.getItem(TEMP_FORM_KEY);
       if (tempRaw) {
@@ -1215,8 +1227,7 @@ export default function FinanceX() {
     const totalG = rowsG.reduce((a,r)=>a+(+r.monto||0),0);
     const hayG   = rowsG.some(r=>r.concepto.trim()&&+r.monto>0);
 
-    // Ingresos
-    const [panelOpen, setPanelOpen] = useState({ Ingresos: true, Egresos: true });
+    // ...existing code...
     const updI = (id,k,v) => setRowsI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addI = () => setRowsI(r=>[...r, EROW(r.length)]);
     const delI = (id) => setRowsI(r=>r.filter(x=>x.id!==id));
@@ -1236,10 +1247,7 @@ export default function FinanceX() {
     const fmtVal = n => $(n || 0);
     const totalConteo = DENOMS.reduce((a,d)=>a+d*(conteoLocal[d]||0),0) + (conteoLocal["extra"]||0);
     const totalMonedas = [50,100,200,500].reduce((a,d)=>a+d*(conteoLocal[d]||0),0);
-    const GI_ROW = (concepto = "") => ({ id: uid(), concepto, monto: "" });
-    const initGastosInternos = () => [GI_ROW("Domicilios"), GI_ROW("Turno"), GI_ROW()];
-    const [rowsGI, setRowsGI] = useState(initGastosInternos());
-    const [savedConteoMsg, setSavedConteoMsg] = useState(false);
+    // ...existing code...
     const updGI = (id,k,v) => setRowsGI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addGI = () => setRowsGI(r=>[...r, GI_ROW()]);
     const limpiarGI = () => setRowsGI(initGastosInternos());
@@ -1441,7 +1449,7 @@ export default function FinanceX() {
                       <colgroup>
                         {cfg.sinConcepto
                           ? <><col style={{width:"55%"}}/><col style={{width:"45%"}}/></>
-                          : <><col style={{width:"38%"}}/><col style={{width:"34%"}}/><col style={{width:"28%"}}/></>
+                          : <><col style={{width:"38%"}}/><col style={{width:"22%"}}/><col style={{width:"40%"}}/></>
                         }
                       </colgroup>
                       <thead>
@@ -1555,9 +1563,9 @@ export default function FinanceX() {
                   <colgroup><col style={{width:"30%"}}/><col style={{width:"45%"}}/><col style={{width:"25%"}}/></colgroup>
                   <thead>
                     <tr className="bg-gray-800/80">
-                      {"MÉTODO","CONCEPTO","MONTO"}.map(h=>(
+                      { ["MÉTODO","CONCEPTO","MONTO"].map(h=>(
                         <th key={h} className="border-b border-r border-gray-700 last:border-r-0 text-left px-1.5 py-1 text-gray-500 font-medium" style={{fontSize:"9px"}}>{h}</th>
-                      ))
+                      )) }
                     </tr>
                   </thead>
                   <tbody>
@@ -1600,6 +1608,24 @@ export default function FinanceX() {
                 }}
                   className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 bg-yellow-700 hover:bg-yellow-600 text-white">
                   <Ic d={ICONS.check} s={15} c="#fff"/> Guardar temporal
+                </button>
+                <button onClick={() => {
+                  // Registrar gastos internos en historial
+                  const fechaHoy = new Date().toISOString().split('T')[0];
+                  const validasGI = rowsGI.filter(r => r.concepto.trim() && +r.monto > 0);
+                  if (!validasGI.length) return;
+                  setHistorial(h => {
+                    const dia = h[fechaHoy] || { ventas: [], gastos: [] };
+                    const nuevosGastos = [...dia.gastos, ...validasGI.map(r => ({
+                      id: uid(), hora: nowStr(), fecha: fechaHoy, concepto: r.concepto.trim(), monto: +r.monto, caja: "Efectivo", categoria: "gasto interno"
+                    }))];
+                    return { ...h, [fechaHoy]: { ...dia, gastos: nuevosGastos } };
+                  });
+                  setRowsGI(initGastosInternos());
+                  setSavedConteoMsg(true);
+                  setTimeout(() => setSavedConteoMsg(false), 1200);
+                }} className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 bg-green-700 hover:bg-green-600 text-white">
+                  <Ic d={ICONS.check} s={15} c="#fff"/> Registrar
                 </button>
                 <button onClick={addGI} className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 text-gray-600 hover:text-orange-400 border border-gray-700/50" style={{fontSize:"10px"}}>
                   <Ic d={ICONS.plus} s={10}/> fila
@@ -1885,6 +1911,7 @@ export default function FinanceX() {
   const TAB_ICONS = {
     cajaDiaria: ICONS.cashRegister,
     historial: ICONS.notebook,
+    metricas: ICONS.check,
   };
   return (
     <div className="min-h-screen bg-gray-950 text-white" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
@@ -1952,6 +1979,7 @@ export default function FinanceX() {
           <main className="flex-1 min-w-0 pb-8">
             {tab === "cajaDiaria" && <ViewCajaDiaria />}
             {tab === "historial"  && <ViewHistorial />}
+            {tab === "metricas"   && <ViewMetricas historial={historial} />}
           </main>
         </div>
       </div>
