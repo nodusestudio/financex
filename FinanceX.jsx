@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
 import ViewMetricas from "./src/ViewMetricas.jsx";
@@ -103,15 +103,21 @@ export default function FinanceX() {
 
   // Meses guardados: { "2025-03": { resumen, ventas, gastos } }
   const [mesesGuardados, setMesesGuardados] = useState({});
+  const [mostrarRecuperar, setMostrarRecuperar] = useState(false);
+  const [backup, setBackup] = useState(null);
+  const [sincroBloqueada, setSincroBloqueada] = useState(false);
+  const [mostrarVisualizador, setMostrarVisualizador] = useState(false);
 
   // Sheets
   const [sheetVenta, setSheetVenta] = useState(false);
+  const [sheetGasto, setSheetGasto] = useState(false);
 
   // Forms
   const [fVenta, setFVenta] = useState({ concepto: "", fecha: todayStr(), ...Object.fromEntries(METODOS.map(m => [m.key, ""])) });
   const [fGasto, setFGasto] = useState({ concepto: "", monto: "", caja: "efectivo", categoria: "domicilio" });
 
   const TODAY = todayStr();
+  const BACKUP_KEY = "financex_backup_datos";
 
   // ── Datos del día actual ──────────────────────────────────────────────────
   const diaHoy = historial[TODAY] || { ventas: [], gastos: [] };
@@ -141,7 +147,7 @@ export default function FinanceX() {
     ])),
     [totVentas, totGastosPorCaja]
   );
-  const netoTotal = useMemo(() => METODOS.reduce((a, m) => a + neto[m.key], 0), [neto]);
+  const netoTotal = useMemo(() => granTotal - totGastos, [granTotal, totGastos]);
   const saldoTotalGlobal = useMemo(
     () =>
       Object.values(historial).reduce((acc, dia) => {
@@ -151,6 +157,391 @@ export default function FinanceX() {
       }, 0),
     [historial]
   );
+
+  const recuperarDatos = () => {
+    if (!backup) return;
+    
+    if (backup.historial) setHistorial(backup.historial);
+    if (backup.mesesGuardados) setMesesGuardados(backup.mesesGuardados);
+    if (backup.conteo) setConteo({ ...conteoInicial(), ...backup.conteo });
+    
+    setSincroBloqueada(false);
+    setMostrarRecuperar(false);
+  };
+
+  const descargarBackup = () => {
+    const data = {
+      historial,
+      mesesGuardados,
+      conteo,
+      timestamp: new Date().toISOString(),
+    };
+    
+    // Preparar datos para Excel
+    const hojas = [];
+    
+    // Hoja 1: Resumen general
+    const resumen = [{
+      "Período": "RESUMEN GENERAL",
+      "Total Días": Object.keys(historial).length,
+      "Total Meses": Object.keys(mesesGuardados).length,
+      "Saldo Total": saldoTotalGlobal,
+      "Generado": new Date().toLocaleString('es-CO'),
+    }];
+    
+    // Hoja 2: Historial diario
+    const filasHistorial = Object.entries(historial)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([fecha, dia]) => {
+        const ingresos = METODOS.reduce((a, m) => a + dia.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
+        const egresos = METODOS.reduce((a, m) => a + dia.gastos.filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
+        return {
+          "Fecha": fecha,
+          "Ingresos": ingresos,
+          "Egresos": egresos,
+          "Saldo": ingresos - egresos,
+          "# Ventas": dia.ventas.length,
+          "# Gastos": dia.gastos.length,
+        };
+      });
+    
+    // Hoja 3: Detalle por método de pago
+    const filasMetodos = [];
+    Object.entries(historial).forEach(([fecha, dia]) => {
+      METODOS.forEach(m => {
+        const ventas = dia.ventas.reduce((a, v) => a + (+v[m.key] || 0), 0);
+        const gastos = dia.gastos.filter(g => g.caja === m.key).reduce((a, g) => a + (+g.monto || 0), 0);
+        if (ventas > 0 || gastos > 0) {
+          filasMetodos.push({
+            "Fecha": fecha,
+            "Método": m.label,
+            "Ingresos": ventas,
+            "Egresos": gastos,
+            "Neto": ventas - gastos,
+          });
+        }
+      });
+    });
+    
+    // Hoja 4: Detalle de gastos
+    const filasGastos = [];
+    Object.entries(historial).forEach(([fecha, dia]) => {
+      dia.gastos?.forEach(g => {
+        filasGastos.push({
+          "Fecha": fecha,
+          "Hora": g.hora,
+          "Concepto": g.concepto,
+          "Método": METODOS.find(m => m.key === g.caja)?.label || g.caja,
+          "Monto": g.monto,
+          "Categoría": g.categoria,
+        });
+      });
+    });
+    
+    // Crear workbook con múltiples hojas
+    const ws1 = XLSX.utils.json_to_sheet(resumen);
+    const ws2 = XLSX.utils.json_to_sheet(filasHistorial);
+    const ws3 = XLSX.utils.json_to_sheet(filasMetodos);
+    const ws4 = XLSX.utils.json_to_sheet(filasGastos);
+    
+    // Ajustar ancho de columnas
+    ws1['!cols'] = [{wch: 20}, {wch: 12}, {wch: 12}, {wch: 15}, {wch: 25}];
+    ws2['!cols'] = [{wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10}, {wch: 10}];
+    ws3['!cols'] = [{wch: 12}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}];
+    ws4['!cols'] = [{wch: 12}, {wch: 8}, {wch: 25}, {wch: 15}, {wch: 12}, {wch: 15}];
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
+    XLSX.utils.book_append_sheet(wb, ws2, "Historial Diario");
+    XLSX.utils.book_append_sheet(wb, ws3, "Por Método");
+    XLSX.utils.book_append_sheet(wb, ws4, "Detalle Gastos");
+    
+    XLSX.writeFile(wb, `FinanceX-Backup-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const habilitarSincroDatos = () => {
+    setSincroBloqueada(false);
+    setSyncStatus("Sincronización habilitada");
+  };
+
+  // ════ COMPONENTE: VISUALIZADOR DE DATOS (EN TIEMPO REAL) ════
+  const VisualizadorDatos = () => {
+    const [tab, setTab] = useState("resumen");
+    
+    // Cálculos en tiempo real basados en historial actual
+    const totalIngresos = useMemo(() => 
+      Object.values(historial).reduce((a, d) => a + d.ventas.reduce((s, v) => s + (v.total || 0), 0), 0),
+      [historial]
+    );
+    
+    const totalEgresos = useMemo(() => 
+      Object.values(historial).reduce((a, d) => a + d.gastos.reduce((s, g) => s + (g.monto || 0), 0), 0),
+      [historial]
+    );
+    
+    const saldoFinal = totalIngresos - totalEgresos;
+    
+    return (
+      <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto">
+        <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-5xl w-full my-4 shadow-2xl">
+          
+          {/* Header */}
+          <div className="border-b border-gray-700 px-6 py-4 flex items-center justify-between bg-gradient-to-r from-gray-900 to-gray-800">
+            <div>
+              <h2 className="text-2xl font-bold text-white">📊 Dashboard Financiero</h2>
+              <p className="text-xs text-gray-400 mt-1">Datos actualizados en tiempo real</p>
+            </div>
+            <button 
+              onClick={() => setMostrarVisualizador(false)}
+              className="text-gray-400 hover:text-white text-2xl transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Resumen rápido en tarjetas */}
+          <div className="px-6 py-4 grid grid-cols-2 md:grid-cols-4 gap-3 border-b border-gray-700">
+            <div className="bg-emerald-900/20 border border-emerald-700/50 rounded-lg px-3 py-2">
+              <div className="text-gray-400 text-xs uppercase tracking-wider mb-1">??  TOTAL INGRESOS</div>
+              <div className="text-2xl font-bold text-emerald-400">{$(totalIngresos)}</div>
+            </div>
+            
+            <div className="bg-red-900/20 border border-red-700/50 rounded-lg px-3 py-2">
+              <div className="text-gray-400 text-xs uppercase tracking-wider mb-1">??  TOTAL EGRESOS</div>
+              <div className="text-2xl font-bold text-red-400">{$(totalEgresos)}</div>
+            </div>
+            
+            <div className={`bg-blue-900/20 border border-blue-700/50 rounded-lg px-3 py-2 ${saldoFinal >= 0 ? "border-blue-700/50" : "border-red-700/50"}`}>
+              <div className="text-gray-400 text-xs uppercase tracking-wider mb-1">?? SALDO NETO</div>
+              <div className={`text-2xl font-bold ${saldoFinal >= 0 ? "text-blue-400" : "text-red-400"}`}>{$(saldoFinal)}</div>
+            </div>
+
+            <div className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+              <div className="text-gray-400 text-xs uppercase tracking-wider mb-1">?? MOVIMIENTOS</div>
+              <div className="text-2xl font-bold text-gray-200">{Object.keys(historial).length}</div>
+              <div className="text-xs text-gray-500">días</div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="border-b border-gray-700 px-6 flex gap-2 bg-gray-800/50 overflow-x-auto">
+            {[
+              { id: "resumen", label: "📈 Resumen", count: 1 },
+              { id: "diario", label: "📅 Diario", count: Object.keys(historial).length },
+              { id: "metodos", label: "💳 Métodos", count: METODOS.length },
+              { id: "gastos", label: "🔴 Gastos", count: Object.values(historial).reduce((a, d) => a + (d.gastos?.length || 0), 0) },
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`py-3 px-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  tab === t.id 
+                    ? "border-blue-500 text-blue-400"
+                    : "border-transparent text-gray-400 hover:text-gray-300"
+                }`}
+              >
+                {t.label} <span className="text-xs text-gray-500">({t.count})</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Contenido */}
+          <div className="p-6 max-h-[60vh] overflow-y-auto">
+            
+            {/* RESUMEN */}
+            {tab === "resumen" && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Tarjetas de resumen */}
+                <div className="space-y-3">
+                  <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                    <div className="text-gray-500 text-xs uppercase mb-3">📊 Resumen General</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Total Días:</span>
+                        <span className="text-white font-semibold">{Object.keys(historial).length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Total Meses:</span>
+                        <span className="text-white font-semibold">{Object.keys(mesesGuardados).length}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-gray-700 pt-2 mt-2">
+                        <span className="text-gray-400">Generado:</span>
+                        <span className="text-gray-300 text-xs">{new Date().toLocaleString('es-CO')}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Gráfico circular de ingresos/egresos */}
+                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                  <div className="text-gray-500 text-xs uppercase mb-3">💰 Distribución</div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex justify-between mb-1 text-sm">
+                        <span className="text-emerald-400">Ingresos</span>
+                        <span className="font-mono">{$(totalIngresos)}</span>
+                      </div>
+                      <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-emerald-500 transition-all duration-300"
+                          style={{ width: totalIngresos + totalEgresos > 0 ? `${(totalIngresos / (totalIngresos + totalEgresos)) * 100}%` : "0%" }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between mb-1 text-sm">
+                        <span className="text-red-400">Egresos</span>
+                        <span className="font-mono">{$(totalEgresos)}</span>
+                      </div>
+                      <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-red-500 transition-all duration-300"
+                          style={{ width: totalIngresos + totalEgresos > 0 ? `${(totalEgresos / (totalIngresos + totalEgresos)) * 100}%` : "0%" }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* HISTORIAL DIARIO */}
+            {tab === "diario" && (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-gray-800">
+                      <th className="border border-gray-700 px-3 py-2 text-left text-gray-400 font-semibold">Fecha</th>
+                      <th className="border border-gray-700 px-3 py-2 text-right text-emerald-400 font-semibold">Ingresos</th>
+                      <th className="border border-gray-700 px-3 py-2 text-right text-red-400 font-semibold">Egresos</th>
+                      <th className="border border-gray-700 px-3 py-2 text-right text-blue-400 font-semibold">?? SALDO</th>
+                      <th className="border border-gray-700 px-3 py-2 text-center text-gray-400 font-semibold"># Mov</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(historial).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-gray-500">Sin registros aún</td>
+                      </tr>
+                    ) : Object.entries(historial)
+                      .sort(([a], [b]) => b.localeCompare(a))
+                      .map(([fecha, dia]) => {
+                        const ingresos = METODOS.reduce((a, m) => a + dia.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
+                        const egresos = METODOS.reduce((a, m) => a + dia.gastos.filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
+                        const saldo = ingresos - egresos;
+                        return (
+                          <tr key={fecha} className="border-b border-gray-700 hover:bg-gray-800/50 transition-colors">
+                            <td className="border border-gray-700 px-3 py-2 font-mono text-gray-300">{fecha}</td>
+                            <td className="border border-gray-700 px-3 py-2 text-right text-emerald-400 font-mono">{$(ingresos)}</td>
+                            <td className="border border-gray-700 px-3 py-2 text-right text-red-400 font-mono">{$(egresos)}</td>
+                            <td className={`border border-gray-700 px-3 py-2 text-right font-mono font-bold ${saldo >= 0 ? "text-blue-400" : "text-red-400"}`}>
+                              {$(saldo)}
+                            </td>
+                            <td className="border border-gray-700 px-3 py-2 text-center text-gray-400">{(dia.ventas?.length || 0) + (dia.gastos?.length || 0)}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* POR MÉTODO */}
+            {tab === "metodos" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {METODOS.map(m => {
+                  const totalVentas = Object.values(historial).reduce((a, d) => a + d.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
+                  const totalGastos = Object.values(historial).reduce((a, d) => a + d.gastos.filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
+                  const neto = totalVentas - totalGastos;
+                  
+                  return (
+                    <div key={m.key} className="bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-gray-600 transition-colors">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-3 h-3 rounded-full" style={{ background: m.color }} />
+                        <div className="font-bold text-white flex-1">{m.label}</div>
+                        <div className={`text-sm font-mono font-bold ${neto >= 0 ? "text-blue-400" : "text-red-400"}`}>
+                          {$(neto)}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <div className="text-gray-500 mb-1">Ingresos</div>
+                          <div className="text-emerald-400 font-mono font-semibold">{$(totalVentas)}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500 mb-1">Egresos</div>
+                          <div className="text-red-400 font-mono font-semibold">{$(totalGastos)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* GASTOS */}
+            {tab === "gastos" && (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-800">
+                      <th className="border border-gray-700 px-2 py-2 text-left text-gray-400">Fecha</th>
+                      <th className="border border-gray-700 px-2 py-2 text-left text-gray-400">Hora</th>
+                      <th className="border border-gray-700 px-2 py-2 text-left text-gray-400">?? CONCEPTO</th>
+                      <th className="border border-gray-700 px-2 py-2 text-left text-gray-400">Método</th>
+                      <th className="border border-gray-700 px-2 py-2 text-right text-gray-400">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(historial).flatMap(([fecha, dia]) => 
+                      dia.gastos?.map(g => ({ fecha, ...g })) || []
+                    ).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-gray-500">Sin gastos registrados</td>
+                      </tr>
+                    ) : Object.entries(historial)
+                      .flatMap(([fecha, dia]) => 
+                        dia.gastos?.map(g => ({ fecha, ...g })) || []
+                      )
+                      .sort((a, b) => `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`))
+                      .map((g, i) => (
+                        <tr key={i} className="border-b border-gray-700 hover:bg-gray-800/50">
+                          <td className="border border-gray-700 px-2 py-1 font-mono">{g.fecha}</td>
+                          <td className="border border-gray-700 px-2 py-1">{g.hora}</td>
+                          <td className="border border-gray-700 px-2 py-1 truncate">{g.concepto}</td>
+                          <td className="border border-gray-700 px-2 py-1">
+                            <span style={{ color: METODOS.find(m => m.key === g.caja)?.color }}>
+                              {METODOS.find(m => m.key === g.caja)?.label || g.caja}
+                            </span>
+                          </td>
+                          <td className="border border-gray-700 px-2 py-1 text-right text-red-400 font-mono font-semibold">−{$(g.monto)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-gray-700 px-6 py-4 bg-gray-800/50 flex gap-2 justify-end">
+            <button
+              onClick={() => descargarBackup()}
+              className="bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              📊 Descargar EXCEL
+            </button>
+            <button
+              onClick={() => setMostrarVisualizador(false)}
+              className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const reiniciarTodo = () => {
     const ok = window.confirm("Esto eliminara todos los datos (local y nube). Deseas continuar?");
@@ -178,44 +569,59 @@ export default function FinanceX() {
 
   useEffect(() => {
     let isActive = true;
-    let localData = null;
 
-    const cargarDesdeFirestore = async () => {
+    const cargarDatos = async () => {
       try {
+        // 1. Cargar datos locales (PRIMERO y como fuente de verdad)
         const raw = localStorage.getItem(STORAGE_KEY);
-        localData = raw ? JSON.parse(raw) : null;
-        if (localData?.historial) setHistorial(localData.historial);
+        const localData = raw ? JSON.parse(raw) : null;
+
+        if (localData?.historial) {
+          setHistorial(localData.historial);
+          setBackup(localData); // Guardar como backup
+        }
         if (localData?.mesesGuardados) setMesesGuardados(localData.mesesGuardados);
         if (localData?.conteo) setConteo({ ...conteoInicial(), ...localData.conteo });
-      } catch (error) {
-        console.error("Error leyendo almacenamiento local", error);
-      }
 
-      try {
-        const snap = await getDoc(doc(db, "financex", "appData"));
-        if (!isActive) return;
+        // 2. Intentar cargar de Firestore (PERO CON VALORACIÓN CUIDADOSA)
+        try {
+          const snap = await getDoc(doc(db, "financex", "appData"));
+          if (!isActive) return;
 
-        if (snap.exists()) {
-          const cloud = snap.data();
-          const cloudUpdated = new Date(cloud.updatedAt || 0).getTime();
-          const localUpdated = new Date(localData?.updatedAt || 0).getTime();
-          const selected = cloudUpdated >= localUpdated ? cloud : localData;
+          if (snap.exists()) {
+            const cloud = snap.data();
+            
+            // ⚠️ VALIDACIÓN: Solo usar datos de nube si tienen contenido y son más recientes
+            const esValidoCloud = cloud?.historial && Object.keys(cloud.historial || {}).length > 0;
+            const cloudModerno = new Date(cloud.updatedAt || 0).getTime();
+            const localModerno = new Date(localData?.updatedAt || 0).getTime();
 
-          if (selected?.historial) setHistorial(selected.historial);
-          if (selected?.mesesGuardados) setMesesGuardados(selected.mesesGuardados);
-          if (selected?.conteo) setConteo({ ...conteoInicial(), ...selected.conteo });
+            // Solo sobrescribir SI la nube tiene datos Y ES MÁS RECIENTE
+            if (esValidoCloud && cloudModerno > localModerno) {
+              console.log("✓ Nube válida y más reciente, usando datos cloud");
+              if (cloud.historial) setHistorial(cloud.historial);
+              if (cloud.mesesGuardados) setMesesGuardados(cloud.mesesGuardados);
+              if (cloud.conteo) setConteo({ ...conteoInicial(), ...cloud.conteo });
+            } else if (!esValidoCloud && localData?.historial) {
+              console.warn("⚠️ Nube VACÍA pero hay datos locales - BLOQUEANDO SINCRONIZACIÓN");
+              setSincroBloqueada(true);
+              setMostrarRecuperar(true);
+            }
+          }
+
+          setSyncStatus("Sincronizado");
+        } catch (fbError) {
+          console.error("Error Firestore:", fbError);
+          if (isActive) setSyncStatus(localData ? "Modo offline (datos locales)" : "Error nube");
         }
-
-        setSyncStatus("Sincronizado");
       } catch (error) {
-        console.error("Error cargando Firestore", error);
-        if (isActive) setSyncStatus(localData ? "Guardado local" : "Error nube");
+        console.error("Error cargando datos:", error);
       } finally {
         if (isActive) setIsFirestoreReady(true);
       }
     };
 
-    cargarDesdeFirestore();
+    cargarDatos();
     return () => {
       isActive = false;
     };
@@ -223,6 +629,7 @@ export default function FinanceX() {
 
   useEffect(() => {
     if (!isFirestoreReady) return;
+    if (sincroBloqueada) return; // NO sincronizar si está bloqueada
 
     const payload = {
       historial,
@@ -231,28 +638,41 @@ export default function FinanceX() {
       updatedAt: new Date().toISOString(),
     };
 
+    // Guardar SIEMPRE en localStorage (es el respaldo)
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(payload)); // Backup adicional
     } catch (error) {
       console.error("Error guardando almacenamiento local", error);
     }
 
+    // Guardar en Firestore CON VALIDACIÓN
     setSyncStatus("Guardando...");
     let cancelled = false;
+    
+    // PROTECCIÓN: No guardar si los datos se ven vacíos/corruptos
+    const tieneDatos = Object.keys(historial || {}).length > 0;
+    
     (async () => {
       try {
-        await setDoc(doc(db, "financex", "appData"), payload, { merge: true });
-        if (!cancelled) setSyncStatus("Sincronizado");
+        // Solo guardar en Firestore si hay datos válidos
+        if (tieneDatos) {
+          await setDoc(doc(db, "financex", "appData"), payload, { merge: true });
+          if (!cancelled) setSyncStatus("✓ Sincronizado");
+        } else {
+          // Si está vacío, mantener localmente pero no sobrescribir nube
+          if (!cancelled) setSyncStatus("Guardado local (protegido)");
+        }
       } catch (error) {
         console.error("Error guardando Firestore", error);
-        if (!cancelled) setSyncStatus("Guardado local");
+        if (!cancelled) setSyncStatus("Guardado local (error nube)");
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [historial, mesesGuardados, conteo, isFirestoreReady, STORAGE_KEY]);
+  }, [historial, mesesGuardados, conteo, isFirestoreReady, sincroBloqueada, STORAGE_KEY]);
 
   useEffect(() => {
     const onBeforeInstall = (event) => {
@@ -337,14 +757,25 @@ export default function FinanceX() {
   const [filasGastos, setFilasGastos] = useState([EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]);
 
   // ══════════════════════════════════════════════════════════════════════════
-  const S = { // styles
-    card:    "bg-gray-800 border border-gray-700 rounded-2xl",
+const S = { // styles
+    card:    "bg-gray-800 border border-gray-700 rounded-2xl shadow-lg",
     section: "text-xs text-gray-500 uppercase tracking-widest font-semibold mb-2",
     row:     "flex items-center justify-between py-2.5 border-b border-gray-800 last:border-0",
+    btn:     {
+      primary: "bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+      success: "bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+      danger:  "bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+      ghost:   "bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+    },
+    table: {
+      header: "bg-gray-800/80 border-b border-gray-700",
+      cell:   "border border-gray-700 px-3 py-2 text-xs",
+      row:    "border-b border-gray-700 hover:bg-gray-800/50 transition-colors",
+    }
   };
 
   // ════════════════════════════════════════════════════════════════════════
-  // VIEW: CIERRE DE CAJA
+  // VIEW: CIERRE DE CAJA (CON RESUMEN VISUAL)
   // ════════════════════════════════════════════════════════════════════════
   const ViewMayor = () => {
     const fmtC = (n) => $(n || 0);
@@ -354,11 +785,38 @@ export default function FinanceX() {
       ...diaHoy.gastos.map(g => ({ ...g, _tipo: "gasto" })),
     ].sort((a, b) => a.hora.localeCompare(b.hora));
 
-    const tdCls = "py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden";
-    const thCls = "py-1.5 text-center border-r border-gray-700/50 last:border-r-0";
-
     return (
-      <div className={`${S.card} overflow-hidden`}>
+      <div className="space-y-4">
+        {/* RESUMEN EN TARJETAS */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className={`${S.card} px-4 py-3`}>
+            <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">?? INGRESOS</div>
+            <div className="text-2xl font-bold text-emerald-400">{fmtC(granTotal)}</div>\n            <div className="text-gray-600 text-xs mt-1">{diaHoy.ventas?.length || 0} transacciones</div>
+          </div>
+          
+          <div className={`${S.card} px-4 py-3`}>
+            <div className="text-gray-500 text-x uppercase tracking-wider text-xs mb-1">?? EGRESOS</div>
+            <div className="text-2xl font-bold text-red-400">−{fmtC(totGastos)}</div>
+            <div className="text-gray-600 text-xs mt-1">{diaHoy.gastos?.length || 0} transacciones</div>
+          </div>
+          
+          <div className={`${S.card} px-4 py-3`}>
+            <div className="text-gray-500 text-x uppercase tracking-wider text-xs mb-1">?? SALDO NETO</div>
+            <div className={`text-2xl font-bold mt-1 ${netoTotal >= 0 ? "text-blue-400" : "text-red-400"}`}>
+              {fmtC(netoTotal)}
+            </div>
+          </div>
+
+          <div className={`${S.card} px-4 py-3 col-span-2 md:col-span-1`}>
+            <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">?? DESDE INICIO</div>
+            <div className={`text-2xl font-bold mt-1 ${saldoTotalGlobal >= 0 ? "text-blue-400" : "text-red-400"}`}>
+              {fmtC(saldoTotalGlobal)}
+            </div>
+          </div>
+        </div>
+
+        {/* TABLA DE MOVIMIENTOS */}
+        <div className={`${S.card} overflow-hidden`}>
 
         {/* Header */}
         <div className="px-3 pt-3 pb-2 flex items-center justify-between border-b border-gray-700">
@@ -383,9 +841,9 @@ export default function FinanceX() {
             {/* Encabezados */}
             <thead>
               <tr className="bg-gray-800/70 border-b border-gray-700">
-                <th className={`${thCls} text-left pl-3 text-gray-500`}>Concepto</th>
+                <th className="py-1.5 text-center border-r border-gray-700/50 last:border-r-0 text-left pl-3 text-gray-500">?? CONCEPTO</th>
                 {METODOS.map(m => (
-                  <th key={m.key} className={thCls}>
+                  <th key={m.key} className="py-1.5 text-center border-r border-gray-700/50 last:border-r-0">
                     <div className="flex flex-col items-center gap-0.5">
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: m.color }} />
                       <span style={{ color: m.color, fontSize: "9px" }} className="uppercase tracking-wide leading-none">
@@ -394,7 +852,7 @@ export default function FinanceX() {
                     </div>
                   </th>
                 ))}
-                <th className={`${thCls} text-gray-500 pr-2`}>Total</th>
+                <th className="py-1.5 text-center border-r border-gray-700/50 last:border-r-0 text-gray-500 pr-2">Total</th>
               </tr>
             </thead>
 
@@ -427,13 +885,13 @@ export default function FinanceX() {
                     {METODOS.map(m => {
                       const val = isVenta ? (r[m.key] || 0) : (r.caja === m.key ? r.monto : 0);
                       return (
-                        <td key={m.key} className={`${tdCls} ${val > 0 ? (isVenta ? "text-emerald-400" : "text-red-400") : "text-gray-700"}`}>
+                        <td key={m.key} className={`py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden ${val > 0 ? (isVenta ? "text-emerald-400" : "text-red-400") : "text-gray-700"}`}>
                           {fmtC(val)}
                         </td>
                       );
                     })}
                     {/* Total fila */}
-                    <td className={`${tdCls} font-bold ${isVenta ? "text-emerald-300" : "text-red-300"}`}>
+                    <td className={`py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold ${isVenta ? "text-emerald-300" : "text-red-300"}`}>
                       {isVenta ? fmtC(r.total) : `−${fmtC(r.monto)}`}
                     </td>
                   </tr>
@@ -449,11 +907,11 @@ export default function FinanceX() {
                   <tr className="border-t-2 border-gray-600 bg-emerald-900/20">
                     <td className="py-1.5 pl-3 pr-1 text-xs font-bold text-emerald-400 border-r border-gray-700/50">↑ Ingr.</td>
                     {METODOS.map(m => (
-                      <td key={m.key} className={`${tdCls} font-bold ${totVentas[m.key] > 0 ? "text-emerald-400" : "text-gray-700"}`}>
+                      <td key={m.key} className={`py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold ${totVentas[m.key] > 0 ? "text-emerald-400" : "text-gray-700"}`}>
                         {fmtC(totVentas[m.key])}
                       </td>
                     ))}
-                    <td className={`${tdCls} font-bold text-emerald-400`}>{fmtC(granTotal)}</td>
+                    <td className="py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold text-emerald-400">{fmtC(granTotal)}</td>
                   </tr>
                 )}
                 {/* Egresos */}
@@ -461,11 +919,11 @@ export default function FinanceX() {
                   <tr className="border-t border-gray-700/60 bg-red-900/20">
                     <td className="py-1.5 pl-3 pr-1 text-xs font-bold text-red-400 border-r border-gray-700/50">↓ Egr.</td>
                     {METODOS.map(m => (
-                      <td key={m.key} className={`${tdCls} font-bold ${totGastosPorCaja[m.key] > 0 ? "text-red-400" : "text-gray-700"}`}>
+                      <td key={m.key} className={`py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold ${totGastosPorCaja[m.key] > 0 ? "text-red-400" : "text-gray-700"}`}>
                         {fmtC(totGastosPorCaja[m.key])}
                       </td>
                     ))}
-                    <td className={`${tdCls} font-bold text-red-400`}>−{fmtC(totGastos)}</td>
+                    <td className="py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold text-red-400">−{fmtC(totGastos)}</td>
                   </tr>
                 )}
                 {/* Neto */}
@@ -474,12 +932,12 @@ export default function FinanceX() {
                   {METODOS.map(m => {
                     const n = (totVentas[m.key] || 0) - (totGastosPorCaja[m.key] || 0);
                     return (
-                      <td key={m.key} className={`${tdCls} font-bold ${n > 0 ? "text-blue-400" : n < 0 ? "text-red-400" : "text-gray-700"}`}>
+                      <td key={m.key} className={`py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold ${n > 0 ? "text-blue-400" : n < 0 ? "text-red-400" : "text-gray-700"}`}>
                         {n !== 0 ? fmtC(n) : "—"}
                       </td>
                     );
                   })}
-                  <td className={`${tdCls} font-bold text-sm ${netoTotal >= 0 ? "text-blue-400" : "text-red-400"}`}>
+                  <td className={`py-1.5 text-center text-xs font-mono border-r border-gray-700/50 last:border-r-0 overflow-hidden font-bold text-sm ${netoTotal >= 0 ? "text-blue-400" : "text-red-400"}`}>
                     {fmtC(netoTotal)}
                   </td>
                 </tr>
@@ -488,90 +946,103 @@ export default function FinanceX() {
           </table>
         </div>
       </div>
+      </div>
     );
   };
 
   // ════════════════════════════════════════════════════════════════════════
-  // VIEW: FONDO DE CAJA
+  // VIEW:   FONDO DE CAJA
   // ════════════════════════════════════════════════════════════════════════
   const ViewMenor = () => {
-    const DenomRow = ({ d, isMoneda }) => {
+    const billeteTotal = BILLETES.reduce((a, d) => a + d * (conteo[d] || 0), 0);
+    const monedaTotal = MONEDAS.reduce((a, d) => a + d * (conteo[d] || 0), 0);
+    
+    const DenomRow = ({ d }) => {
       const cant = conteo[d] || 0;
       return (
-        <div className="flex items-center gap-2 py-1.5 border-b border-gray-800 last:border-0">
-          {/* Denominación */}
-          <div className="w-20 shrink-0">
-            <div className="text-xs font-semibold text-gray-200">{$(d)}</div>
+        <div className="flex items-center gap-2 py-2 border-b border-gray-700/50 last:border-0">
+          <div className="w-24 shrink-0">
+            <div className="text-xs font-semibold text-gray-300">{$(d)}</div>
           </div>
-          {/* Controles */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <button onClick={() => setConteo(c => ({ ...c, [d]: Math.max(0, (c[d] || 0) - 1) }))}
-              className="w-6 h-6 bg-gray-700 hover:bg-gray-600 rounded-md flex items-center justify-center text-white text-sm font-bold leading-none transition-colors">−</button>
-            <span className="text-white font-mono text-xs w-5 text-center font-bold">{cant}</span>
+              className="w-7 h-7 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center text-white text-xs font-bold transition-colors">
+              −
+            </button>
+            <span className="text-white font-mono text-sm w-6 text-center font-bold">{cant}</span>
             <button onClick={() => setConteo(c => ({ ...c, [d]: (c[d] || 0) + 1 }))}
-              className="w-6 h-6 bg-gray-700 hover:bg-gray-600 rounded-md flex items-center justify-center text-white text-sm font-bold leading-none transition-colors">+</button>
+              className="w-7 h-7 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center text-white text-xs font-bold transition-colors">
+              +
+            </button>
           </div>
-          {/* Subtotal */}
           <div className="flex-1 text-right">
-            {cant > 0
-              ? <span className="text-xs font-mono text-yellow-400">{$(cant * d)}</span>
-              : <span className="text-xs text-gray-700">—</span>
-            }
+            {cant > 0 ? (
+              <span className="text-xs font-mono text-yellow-400 font-bold">{$(cant * d)}</span>
+            ) : (
+              <span className="text-xs text-gray-600">—</span>
+            )}
           </div>
         </div>
       );
     };
 
     return (
-      <div className="space-y-3">
-        {/* Total sticky */}
+      <div className="space-y-4">
+        {/* Tarjeta de total */}
         <div className={`${S.card} px-4 py-3 flex items-center justify-between`}>
           <div>
-            <div className="text-xs text-gray-500 uppercase tracking-widest">Fondo de Caja</div>
-            <div className="text-2xl font-bold font-mono text-yellow-400 mt-0.5">{$(totalMenor)}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">   FONDO DE CAJA</div>
+            <div className="text-3xl font-bold font-mono text-yellow-400">{$(totalMenor)}</div>
           </div>
           <button onClick={() => setConteo(Object.fromEntries([...BILLETES, ...MONEDAS].map(d => [d, 0])))}
-            className="text-xs text-gray-600 hover:text-gray-400 border border-gray-700 px-3 py-1.5 rounded-lg transition-colors">
-            Limpiar
+            className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors">
+            🗑️ Limpiar
           </button>
         </div>
 
-        {/* Billetes + Monedas en dos columnas */}
+        {/* Grid: Billetes | Monedas */}
         <div className="grid grid-cols-2 gap-3">
-          {/* Billetes */}
-          <div className={S.card}>
-            <div className="px-3 pt-3 pb-1">
-              <span className={S.section}>Billetes</span>
+          {/* BILLETES */}
+          <div className={`${S.card} overflow-hidden flex flex-col`}>
+            <div className="px-4 py-3 border-b border-gray-700/50 bg-gray-800/50">
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">📄 Billetes</div>
+              <div className="text-xl font-bold text-emerald-400 mt-1">{$(billeteTotal)}</div>
             </div>
-            <div className="px-3 pb-3">
+            <div className="px-3 py-2 flex-1 overflow-y-auto">
               {BILLETES.map(d => <DenomRow key={d} d={d} />)}
             </div>
           </div>
-          {/* Monedas + resumen */}
-          <div className="space-y-3">
-            <div className={S.card}>
-              <div className="px-3 pt-3 pb-1">
-                <span className={S.section}>Monedas</span>
+
+          {/* MONEDAS + RESUMEN */}
+          <div className="space-y-3 flex flex-col">
+            <div className={`${S.card} overflow-hidden flex-1`}>
+              <div className="px-4 py-3 border-b border-gray-700/50 bg-gray-800/50">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">🪙 Monedas</div>
+                <div className="text-xl font-bold text-blue-400 mt-1">{$(monedaTotal)}</div>
               </div>
-              <div className="px-3 pb-3">
+              <div className="px-3 py-2 overflow-y-auto max-h-48">
                 {MONEDAS.map(d => <DenomRow key={d} d={d} />)}
               </div>
             </div>
-            {/* Resumen por tipo */}
-            <div className={S.card + " px-3 py-3 space-y-1.5"}>
-              <span className={S.section}>Resumen</span>
-              {[
-                { label: "Billetes", total: BILLETES.reduce((a, d) => a + d * (conteo[d] || 0), 0) },
-                { label: "Monedas",  total: MONEDAS.reduce((a, d) => a + d * (conteo[d] || 0), 0)  },
-              ].map(x => (
-                <div key={x.label} className="flex justify-between text-xs">
-                  <span className="text-gray-500">{x.label}</span>
-                  <span className="font-mono text-gray-300">{$(x.total)}</span>
+
+            {/* RESUMEN */}
+            <div className={S.card}>
+              <div className="px-4 py-3 border-b border-gray-700/50 bg-gray-800/50">
+                <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">📊 Resumen</div>
+              </div>
+              <div className="px-4 py-3 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-xs">Billetes</span>
+                  <span className="font-mono text-emerald-400 font-bold">{$(billeteTotal)}</span>
                 </div>
-              ))}
-              <div className="border-t border-gray-700 pt-1.5 flex justify-between text-xs">
-                <span className="text-gray-400 font-medium">Total</span>
-                <span className="font-mono font-bold text-yellow-400">{$(totalMenor)}</span>
+                <div className="flex justify-between items-center border-b border-gray-700 pb-2">
+                  <span className="text-gray-400 text-xs">Monedas</span>
+                  <span className="font-mono text-blue-400 font-bold">{$(monedaTotal)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2">
+                  <span className="text-gray-300 text-xs font-semibold">Total</span>
+                  <span className="font-mono text-yellow-400 font-bold text-lg">{$(totalMenor)}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -696,7 +1167,7 @@ export default function FinanceX() {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-gray-600 bg-red-900/20">
-                    <td colSpan={3} className="px-3 py-2 text-red-400 font-bold" style={{fontSize:"10px"}}>Total egresos del día</td>
+                    <td colSpan={3} className="px-3 py-2 text-red-400 font-bold" style={{fontSize:"10px"}}>??  TOTAL EGRESOS DEL D�A</td>
                     <td className="px-3 py-2 text-right font-mono font-bold text-red-400" style={{fontSize:"12px"}}>−{fmtC(totalDia)}</td>
                   </tr>
                 </tfoot>
@@ -783,15 +1254,15 @@ export default function FinanceX() {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-gray-600 bg-emerald-900/20">
-                    <td colSpan={2} className="border-r border-gray-700/50 px-1.5 py-1.5 text-emerald-400 font-bold" style={{fontSize:"9px"}}>↑ Total Ingresos</td>
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1.5 py-1.5 text-emerald-400 font-bold" style={{fontSize:"9px"}}>??  TOTAL INGRESOS</td>
                     {METODOS.map(m=><td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold py-1.5" style={{fontSize:"10px",color:mg.totV[m.key]>0?"#6ee7b7":"#374151"}}>{fmtC(mg.totV[m.key])}</td>)}
                   </tr>
                   <tr className="border-t border-gray-700/50 bg-red-900/20">
-                    <td colSpan={2} className="border-r border-gray-700/50 px-1.5 py-1.5 text-red-400 font-bold" style={{fontSize:"9px"}}>↓ Total Egresos</td>
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1.5 py-1.5 text-red-400 font-bold" style={{fontSize:"9px"}}>??  TOTAL EGRESOS</td>
                     {METODOS.map(m=><td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold py-1.5" style={{fontSize:"10px",color:mg.totG[m.key]>0?"#fca5a5":"#374151"}}>{fmtC(mg.totG[m.key])}</td>)}
                   </tr>
                   <tr className="border-t-2 border-gray-500 bg-blue-950/40">
-                    <td colSpan={2} className="border-r border-gray-700/50 px-1.5 py-1.5 text-blue-300 font-bold" style={{fontSize:"9px"}}>= Saldo</td>
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1.5 py-1.5 text-blue-300 font-bold" style={{fontSize:"9px"}}>?? SALDO</td>
                     {METODOS.map(m=>{
                       const n=(mg.totV[m.key]||0)-(mg.totG[m.key]||0);
                       return <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold py-1.5" style={{fontSize:"10px",color:n>0?"#93c5fd":n<0?"#f87171":"#374151"}}>{n!==0?fmtC(n):"—"}</td>;
@@ -807,89 +1278,50 @@ export default function FinanceX() {
 
     // ── Libro contable ─────────────────────────────────────────────────────
 
-
     return (
-      <div className="space-y-2">
-        {/* Tabla de registro diario */}
-        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden mb-4">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-900">
-                <th className="px-2 py-1 border border-gray-700 text-left">Fecha</th>
-                <th className="px-2 py-1 border border-gray-700 text-right">Ingresos</th>
-                <th className="px-2 py-1 border border-gray-700 text-right">Egresos</th>
-                <th className="px-2 py-1 border border-gray-700 text-right">Saldo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {diasFiltrados.length === 0 ? (
-                <tr><td colSpan={4} className="py-8 text-center text-gray-600 text-xs">Sin movimientos en este mes</td></tr>
-              ) : diasFiltrados.map(dia => {
-                const ingresos = METODOS.reduce((a, m) => a + (dia.ventas||[]).reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
-                const egresos = METODOS.reduce((a, m) => a + (dia.gastos||[]).filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
-                return (
-                  <tr key={dia.fecha} className="bg-gray-900">
-                    <td className="px-2 py-1 border border-gray-700">{dia.fecha}</td>
-                    <td className="px-2 py-1 border border-gray-700 text-right">${ingresos.toLocaleString()}</td>
-                    <td className="px-2 py-1 border border-gray-700 text-right">${egresos.toLocaleString()}</td>
-                    <td className="px-2 py-1 border border-gray-700 text-right">${(ingresos-egresos).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {/* Resumen mensual */}
-
-        {/* Título */}
-        <div className="flex items-center justify-between px-1 pb-1">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Libro Contable</span>
-          <span className="text-xs text-gray-600">{meses.length} {meses.length===1?"mes":"meses"}</span>
-        </div>
-
-        <div className="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5 flex items-center gap-2 flex-wrap">
-          <input
-            type="month"
-            value={mesExport}
-            onChange={e => setMesExport(e.target.value)}
-            className="bg-transparent text-xs text-gray-300 border border-gray-700 rounded-lg px-2 py-1.5"
-          />
-          <button
-            onClick={exportarMes}
-            disabled={!hayMesExport}
-            className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-              hayMesExport ? "text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/20" : "text-gray-600 border-gray-700 cursor-not-allowed"
-            }`}
-          >
-            Descargar Mes Excel
-          </button>
-          <button
-            onClick={exportarTotal}
-            disabled={!Object.keys(historial).length}
-            className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-              Object.keys(historial).length ? "text-blue-300 border-blue-800/60 hover:bg-blue-900/20" : "text-gray-600 border-gray-700 cursor-not-allowed"
-            }`}
-          >
-            Descargar Total Excel
-          </button>
+      <div className="space-y-4">
+        {/* Controles de exportación */}
+        <div className={`${S.card} px-4 py-3`}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <input
+              type="month"
+              value={mesExport}
+              onChange={e => setMesExport(e.target.value)}
+              className="bg-gray-700 border border-gray-600 rounded-lg text-gray-200 text-xs px-3 py-2 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              onClick={exportarMes}
+              disabled={!hayMesExport}
+              className={`text-xs px-3 py-2 rounded-lg font-semibold transition-colors ${
+                hayMesExport ? "bg-emerald-700 hover:bg-emerald-600 text-white" : "bg-gray-700 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              📊 Mes Excel
+            </button>
+            <button
+              onClick={exportarTotal}
+              disabled={!Object.keys(historial).length}
+              className={`text-xs px-3 py-2 rounded-lg font-semibold transition-colors ${
+                Object.keys(historial).length ? "bg-blue-700 hover:bg-blue-600 text-white" : "bg-gray-700 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              📈 Total Excel
+            </button>
+          </div>
         </div>
 
         {meses.length === 0 ? (
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl py-14 text-center">
-            <div className="text-gray-600 text-sm mb-1">Sin registros</div>
-            <div className="text-gray-700 text-xs">Guarda un mes desde Caja Diaria → Ventas del Mes</div>
+          <div className={`${S.card} py-12 text-center`}>
+            <div className="text-4xl mb-2">📚</div>
+            <div className="text-gray-400 text-sm mb-1 font-semibold">Sin registros guardados</div>
+            <div className="text-gray-600 text-xs">Guarda un mes desde <strong>Caja Diaria → Ventas del Mes</strong></div>
           </div>
         ) : (
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-            {/* Cabecera tabla */}
-            <div className="grid border-b border-gray-700 bg-gray-900/60"
-              style={{gridTemplateColumns:"1fr 100px 100px 100px 88px"}}>
-              {["MES","INGRESOS","EGRESOS","TOTAL SALDO",""].map((h,i)=>(
-                <div key={i} className={`px-3 py-2 text-gray-500 font-semibold uppercase tracking-wider ${i>0?"text-right":""}`}
-                  style={{fontSize:"9px",borderRight:i<4?"1px solid #1f2937":"none"}}>
-                  {h}
-                </div>
-              ))}
+          <div className="space-y-2">
+            {/* Cabecera */}
+            <div className="px-4 py-3 bg-gradient-to-r from-gray-900 to-gray-800 border border-gray-700 rounded-t-2xl">
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">📖 Libro Contable</div>
+              <div className="text-sm text-gray-400">{meses.length} {meses.length===1?"mes guardado":"meses guardados"}</div>
             </div>
 
             {/* Filas de meses */}
@@ -899,43 +1331,41 @@ export default function FinanceX() {
               const saldo     = totalIngr - totalEgr;
               return (
                 <div key={mg.mes}
-                  className="grid border-b border-gray-700/50 last:border-b-0 hover:bg-gray-700/30 transition-colors"
-                  style={{gridTemplateColumns:"1fr 100px 100px 100px 88px", background: idx%2===0?"#111827":"#0f172a"}}>
+                  className={`${S.card} px-4 py-3 flex items-center justify-between gap-3 hover:border-blue-600/50 transition-all group`}>
 
-                  {/* Mes */}
-                  <div className="px-3 py-3 flex flex-col justify-center" style={{borderRight:"1px solid #1f2937"}}>
-                    <span className="text-white font-semibold capitalize text-sm">{mg.nombre}</span>
-                    <span className="text-gray-600 mt-0.5" style={{fontSize:"9px"}}>Guardado {mg.savedAt}</span>
+                  {/* Información del mes */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white font-bold capitalize text-sm mb-0.5">{mg.nombre}</div>
+                    <div className="text-xs text-gray-500">Guardado {mg.savedAt}</div>
                   </div>
 
-                  {/* Ingresos */}
-                  <div className="px-3 py-3 text-right flex flex-col justify-center" style={{borderRight:"1px solid #1f2937"}}>
-                    <span className="text-emerald-400 font-mono font-bold text-sm">{fmtC(totalIngr)}</span>
-                    <span className="text-gray-600 mt-0.5" style={{fontSize:"9px"}}>↑ ingresos</span>
+                  {/* Tarjetas de resumen */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-emerald-900/20 border border-emerald-700/30 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-emerald-400 font-mono font-bold text-xs">{fmtC(totalIngr)}</div>
+                      <div className="text-gray-600 text-xs mt-0.5">Ingr.</div>
+                    </div>
+                    
+                    <div className="bg-red-900/20 border border-red-700/30 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-red-400 font-mono font-bold text-xs">{fmtC(totalEgr)}</div>
+                      <div className="text-gray-600 text-xs mt-0.5">Egr.</div>
+                    </div>
+                    
+                    <div className={`bg-blue-900/20 border border-blue-700/30 rounded-lg px-2 py-1.5 text-center`}>
+                      <div className={`font-mono font-bold text-xs ${saldo>=0?"text-blue-400":"text-red-400"}`}>{fmtC(saldo)}</div>
+                      <div className="text-gray-600 text-xs mt-0.5">{saldo>=0?"Sup":"Def"}</div>
+                    </div>
                   </div>
 
-                  {/* Egresos */}
-                  <div className="px-3 py-3 text-right flex flex-col justify-center" style={{borderRight:"1px solid #1f2937"}}>
-                    <span className="text-red-400 font-mono font-bold text-sm">{fmtC(totalEgr)}</span>
-                    <span className="text-gray-600 mt-0.5" style={{fontSize:"9px"}}>↓ egresos</span>
-                  </div>
-
-                  {/* Saldo */}
-                  <div className="px-3 py-3 text-right flex flex-col justify-center" style={{borderRight:"1px solid #1f2937"}}>
-                    <span className={`font-mono font-bold text-sm ${saldo>=0?"text-blue-400":"text-red-400"}`}>{fmtC(saldo)}</span>
-                    <span className="text-gray-600 mt-0.5" style={{fontSize:"9px"}}>{saldo>=0?"superávit":"déficit"}</span>
-                  </div>
-
-                  {/* Botón */}
-                  <div className="px-2 py-3 flex flex-col items-center justify-center gap-1.5">
+                  {/* Botones */}
+                  <div className="flex gap-1.5 shrink-0">
                     <button onClick={()=>setMesDetalle(mg)}
-                      className="w-full py-1.5 rounded-lg bg-gray-700 hover:bg-blue-700 text-gray-300 hover:text-white text-xs font-semibold transition-all border border-gray-600 hover:border-blue-600">
+                      className="px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-xs font-semibold transition-colors">
                       Ver
                     </button>
                     <button
                       onClick={() => exportarExcel(mg.diasHistorial || {}, `financex-${mg.mes}`)}
-                      className="w-full py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-700 text-gray-300 hover:text-white text-xs font-semibold transition-all border border-gray-600 hover:border-emerald-600"
-                    >
+                      className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold transition-colors">
                       Excel
                     </button>
                   </div>
@@ -943,28 +1373,50 @@ export default function FinanceX() {
               );
             })}
 
-            {/* Fila totales globales */}
-            {meses.length > 1 && (()=>{
-              const tI = meses.reduce((a,mg)=>a+METODOS.reduce((b,m)=>b+(mg.totV[m.key]||0),0),0);
-              const tE = meses.reduce((a,mg)=>a+METODOS.reduce((b,m)=>b+(mg.totG[m.key]||0),0),0);
-              const tS = tI - tE;
-              return (
-                <div className="grid border-t-2 border-gray-600 bg-gray-900"
-                  style={{gridTemplateColumns:"1fr 100px 100px 100px 88px"}}>
-                  <div className="px-3 py-2.5 text-gray-400 font-bold text-xs" style={{borderRight:"1px solid #1f2937"}}>TOTAL GENERAL</div>
-                  <div className="px-3 py-2.5 text-right font-mono font-bold text-emerald-400 text-xs" style={{borderRight:"1px solid #1f2937"}}>{fmtC(tI)}</div>
-                  <div className="px-3 py-2.5 text-right font-mono font-bold text-red-400 text-xs" style={{borderRight:"1px solid #1f2937"}}>{fmtC(tE)}</div>
-                  <div className={`px-3 py-2.5 text-right font-mono font-bold text-xs ${tS>=0?"text-blue-400":"text-red-400"}`} style={{borderRight:"1px solid #1f2937"}}>{fmtC(tS)}</div>
-                  <div/>
+            {/* Fila de resumen final */}
+            {meses.length > 1 && (
+              <div className={S.card}>
+                <div className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="text-gray-400 text-xs uppercase tracking-wider font-semibold">🎯 Total General</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-emerald-900/20 border border-emerald-700/30 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-emerald-400 font-mono font-bold text-sm">
+                        {$(
+                          meses.reduce((a,mg)=>a+METODOS.reduce((b,m)=>b+(mg.totV[m.key]||0),0),0)
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-red-900/20 border border-red-700/30 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-red-400 font-mono font-bold text-sm">
+                        {$(
+                          meses.reduce((a,mg)=>a+METODOS.reduce((b,m)=>b+(mg.totG[m.key]||0),0),0)
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-blue-400 font-mono font-bold text-sm">
+                        {$(
+                          meses.reduce((a,mg)=>a+METODOS.reduce((b,m)=>b+(mg.totV[m.key]||0),0),0) -
+                          meses.reduce((a,mg)=>a+METODOS.reduce((b,m)=>b+(mg.totG[m.key]||0),0),0)
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              );
-            })()}
+              </div>
+            )}
           </div>
         )}
       </div>
     );
   };
 
+
+  // 
+  // VIEW: GASTOS DIARIOS
+  // 
   // ════════════════════════════════════════════════════════════════════════
   // VIEW: GASTOS DIARIOS
   // ════════════════════════════════════════════════════════════════════════
@@ -1022,7 +1474,7 @@ export default function FinanceX() {
 
           {/* Header columnas */}
           <div className="grid border-b border-gray-700 bg-gray-800/70" style={{ gridTemplateColumns: "1fr 1fr 80px 28px" }}>
-            {["Método de pago", "Concepto", "Monto", ""].map((h, i) => (
+            {["?? M�TODO DE PAGO", "?? CONCEPTO", "?? MONTO", ""].map((h, i) => (
               <div key={i} className="px-2 py-2 text-xs text-gray-500 font-medium border-r border-gray-700/50 last:border-r-0">{h}</div>
             ))}
           </div>
@@ -1418,7 +1870,7 @@ export default function FinanceX() {
                   label:"Ingresos", color:"#6ee7b7",
                   rows:rowsI, upd:updI, add:addI, del:delI,
                   total:totalI, totRow:totIRow,
-                  totalLabel:"Total ingresos", totalColor:"text-emerald-400",
+                  totalLabel:"??  TOTAL INGRESOS", totalColor:"text-emerald-400",
                   rowBgEven:"#0d1a11", rowBgOdd:"#0a1208",
                   montoColor:"#6ee7b7", sinConcepto: true,
                 },
@@ -1426,7 +1878,7 @@ export default function FinanceX() {
                   label:"Egresos", color:"#fca5a5",
                   rows:rowsG, upd:updG, add:addG, del:delG,
                   total:totalG, totRow:totGRow,
-                  totalLabel:"Total egresos", totalColor:"text-red-400",
+                  totalLabel:"??  TOTAL EGRESOS", totalColor:"text-red-400",
                   rowBgEven:"#1a0d0d", rowBgOdd:"#120a0a",
                   montoColor:"#fca5a5", sinConcepto: false,
                 }
@@ -1454,7 +1906,7 @@ export default function FinanceX() {
                       </colgroup>
                       <thead>
                         <tr className="bg-gray-800/80">
-                          {(cfg.sinConcepto ? ["MÉTODO","MONTO"] : ["MÉTODO","CONCEPTO","MONTO"]).map(h=>(
+                          {(cfg.sinConcepto ? ["?? M�TODO","?? MONTO"] : ["?? M�TODO","?? CONCEPTO","?? MONTO"]).map(h=>(
                             <th key={h} className="border-b border-r border-gray-700 last:border-r-0 text-left px-1.5 py-1 text-gray-500 font-medium" style={{fontSize:"9px"}}>{h}</th>
                           ))}
                         </tr>
@@ -1563,7 +2015,7 @@ export default function FinanceX() {
                   <colgroup><col style={{width:"30%"}}/><col style={{width:"45%"}}/><col style={{width:"25%"}}/></colgroup>
                   <thead>
                     <tr className="bg-gray-800/80">
-                      { ["MÉTODO","CONCEPTO","MONTO"].map(h=>(
+                      { ["?? M�TODO","?? CONCEPTO","?? MONTO"].map(h=>(
                         <th key={h} className="border-b border-r border-gray-700 last:border-r-0 text-left px-1.5 py-1 text-gray-500 font-medium" style={{fontSize:"9px"}}>{h}</th>
                       )) }
                     </tr>
@@ -1765,7 +2217,7 @@ export default function FinanceX() {
                 <tfoot>
                   {/* Ingresos totales */}
                   <tr className="border-t-2 border-gray-600 bg-emerald-900/20">
-                    <td className="border-r border-gray-700/50 px-1 py-1 text-emerald-400 font-bold" style={{fontSize:"9px"}}>Total Ingresos</td>
+                    <td className="border-r border-gray-700/50 px-1 py-1 text-emerald-400 font-bold" style={{fontSize:"9px"}}>??  TOTAL INGRESOS</td>
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-emerald-500">↑</span></td>
                     {METODOS.map(m=>(
                       <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold"
@@ -1776,7 +2228,7 @@ export default function FinanceX() {
                   </tr>
                   {/* Egresos totales */}
                   <tr className="border-t border-gray-700/50 bg-red-900/20">
-                    <td className="border-r border-gray-700/50 px-1 py-1 text-red-400 font-bold" style={{fontSize:"9px"}}>Total Egresos</td>
+                    <td className="border-r border-gray-700/50 px-1 py-1 text-red-400 font-bold" style={{fontSize:"9px"}}>??  TOTAL EGRESOS</td>
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-red-500">↓</span></td>
                     {METODOS.map(m=>(
                       <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold"
@@ -1934,6 +2386,20 @@ export default function FinanceX() {
             </button>
           )}
           <button
+            onClick={() => setMostrarVisualizador(true)}
+            className="text-xs text-purple-400 hover:text-purple-300 border border-purple-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+            title="Ver datos en tablas"
+          >
+            📊 Ver Datos
+          </button>
+          <button
+            onClick={descargarBackup}
+            className="text-xs text-blue-400 hover:text-blue-300 border border-blue-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+            title="Descargar respaldo EXCEL"
+          >
+            💾 Excel
+          </button>
+          <button
             onClick={reiniciarTodo}
             className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
           >
@@ -1944,6 +2410,74 @@ export default function FinanceX() {
           </div>
         </div>
       </header>
+
+      {/* ⚠️ ALERTA SINCRONIZACIÓN BLOQUEADA */}
+      {sincroBloqueada && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }}>
+          <div className="bg-gray-900 border-2 border-yellow-600 rounded-2xl p-6 max-w-md mx-4 shadow-2xl">
+            <div className="text-yellow-500 font-bold text-lg mb-3">⚠️ Sincronización Bloqueada</div>
+            <div className="text-gray-300 text-sm mb-4 space-y-2">
+              <p>Se detectó un problema: <strong>los datos en la nube parecen vacíos o corruptos</strong>.</p>
+              <p>Para evitar pérdida de datos, la sincronización automática ha sido <strong>bloqueada</strong>.</p>
+              <p className="text-yellow-400">✓ Tus datos locales están <strong>protegidos y seguros</strong>.</p>
+            </div>
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 mb-4 text-xs text-gray-400 max-h-40 overflow-y-auto">
+              <div className="font-mono mb-2">📊 Resumen de datos locales:</div>
+              <div>Días registrados: {Object.keys(historial).length}</div>
+              <div>Meses guardados: {Object.keys(mesesGuardados).length}</div>
+              <div>Última sincronización: {new Date().toLocaleString('es-CO')}</div>
+            </div>
+            <div className="flex gap-2 flex-col">
+              <button
+                onClick={recuperarDatos}
+                className="w-full py-2.5 rounded-xl bg-green-700 hover:bg-green-600 text-white font-semibold transition-colors"
+              >
+                ✓ Usar Datos Locales
+              </button>
+              <button
+                onClick={descargarBackup}
+                className="w-full py-2.5 rounded-xl bg-blue-700 hover:bg-blue-600 text-white font-semibold transition-colors"
+              >
+                ↓ Descargar Backup JSON
+              </button>
+              <button
+                onClick={habilitarSincroDatos}
+                className="w-full py-2.5 rounded-xl border border-yellow-600 text-yellow-400 hover:bg-yellow-900/20 font-semibold transition-colors text-sm"
+              >
+                ⚡ Habilitar Sincronización (con cuidado)
+              </button>
+            </div>
+            <div className="text-xs text-gray-500 mt-3 text-center">
+              💾 Los datos se guardan automáticamente en tu navegador
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💡 BANNER de recuperación rápida SI has descargado datos */}
+      {!sincroBloqueada && Object.keys(historial).length > 0 && (
+        <div className="bg-blue-900/30 border-b border-blue-700/50 px-4 py-2 flex items-center justify-between gap-2">
+          <div className="text-xs text-blue-300 flex-1">
+            📌 <strong>{Object.keys(historial).length}</strong> días registrados | <strong>{Object.keys(mesesGuardados).length}</strong> meses guardados
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setMostrarVisualizador(true)}
+              className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1 rounded-lg transition-colors shrink-0"
+              title="Ver datos en tablas"
+            >
+              📊 Ver
+            </button>
+            <button
+              onClick={descargarBackup}
+              className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded-lg transition-colors shrink-0"
+              title="Descargar en Excel"
+            >
+              💾 Excel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="px-2 py-3 mx-auto w-full max-w-7xl">
         <div className="flex gap-3 items-start">
@@ -2112,6 +2646,13 @@ export default function FinanceX() {
           </div>
         </Sheet>
       )}
+
+      {/* VISUALIZADOR DE DATOS */}
+      {mostrarVisualizador && <VisualizadorDatos />}
     </div>
   );
 }
+
+
+
+
