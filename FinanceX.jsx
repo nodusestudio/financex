@@ -1793,6 +1793,7 @@ const S = { // styles
     const [panelOpen, setPanelOpen] = useState({ Ingresos: true, Egresos: true });
     const [editandoMov, setEditandoMov] = useState(null);
     const [editCampos, setEditCampos] = useState({});
+    const [filaDesplegada, setFilaDesplegada] = useState(null);
     // Guardado automático temporal en Firebase para gastos internos
     useEffect(() => {
       const tempGI = {
@@ -2096,6 +2097,14 @@ const S = { // styles
       const egr  = dia.gastos.reduce((a, g) => a + Number(g.monto || 0), 0);
       return { ingr, egr, neto: ingr - egr };
     }, [historial, fechaI]);
+
+    const eliminarEntradaDia = (fecha, tipo, id) => {
+      setHistorial(h => {
+        const dia = h[fecha] || { ventas: [], gastos: [] };
+        const key = tipo === "ingreso" ? "ventas" : "gastos";
+        return { ...h, [fecha]: { ...dia, [key]: dia[key].filter(item => item.id !== id) } };
+      });
+    };
 
     const editarMovGuardado = (mov) => {
       const fecha = mov.fecha;
@@ -2454,6 +2463,7 @@ const S = { // styles
                   <col style={{width:58}}/>
                   <col style={{width:18}}/>
                   {METODOS.map(m=><col key={m.key} style={{width:54}}/>)}
+                  <col style={{width:20}}/>
                 </colgroup>
                 <thead>
                   <tr className="bg-gray-800/80 border-b border-gray-700">
@@ -2469,6 +2479,7 @@ const S = { // styles
                         </div>
                       </th>
                     ))}
+                    <th className="border-gray-700" style={{width:20}}/>
                   </tr>
                 </thead>
                 <tbody>
@@ -2479,13 +2490,18 @@ const S = { // styles
                   ) : (() => {
                     // Agrupar pares por fecha para aplicar rowspan y bordes
                     let lastFecha = null;
-                    return filasVentas.map((fila, i) => {
+                    return filasVentas.flatMap((fila, i) => {
                       const isIngreso = fila.tipo === "ingreso";
                       const isNewFecha = fila.fecha !== lastFecha;
                       if (isIngreso) lastFecha = fila.fecha;
                       const bg = isIngreso ? "#0d1f0d" : "#1f0d0d";
-                      return (
-                        <tr key={`${fila.fecha}-${fila.tipo}`}
+                      const desplegKey = `${fila.fecha}-${fila.tipo}`;
+                      const isDesplegado = filaDesplegada === desplegKey;
+                      const entradas = isIngreso
+                        ? (historial[fila.fecha]?.ventas || [])
+                        : (historial[fila.fecha]?.gastos || []);
+                      const rows = [
+                        <tr key={desplegKey}
                           className={`border-b ${isIngreso ? "border-gray-700/60" : "border-gray-700/20"} last:border-b-0 hover:brightness-125 transition-all`}
                           style={{background:bg}}>
                           {/* Fecha/Día — ingreso muestra nombre del día, egreso muestra fecha */}
@@ -2523,8 +2539,54 @@ const S = { // styles
                               </td>
                             );
                           })}
+                          {/* Botón desglose ▼ */}
+                          <td className="text-center px-0 py-0.5">
+                            {entradas.length > 0 ? (
+                              <button
+                                onClick={() => setFilaDesplegada(isDesplegado ? null : desplegKey)}
+                                className={`transition-all ${isDesplegado ? (isIngreso?"text-emerald-400":"text-red-400") : "text-gray-700 hover:text-gray-400"}`}
+                                title="Ver desglose">
+                                <Ic d={isDesplegado ? ICONS.up : ICONS.down} s={9}/>
+                              </button>
+                            ) : <span style={{color:"#1f2937",fontSize:"8px"}}>—</span>}
+                          </td>
                         </tr>
-                      );
+                      ];
+                      if (isDesplegado) {
+                        rows.push(
+                          <tr key={`${desplegKey}-detail`} style={{background: isIngreso ? "#061406" : "#140606"}}>
+                            <td colSpan={METODOS.length + 3} className="px-3 py-2">
+                              <div className="flex flex-col gap-0.5">
+                                <div className="text-gray-600 font-semibold uppercase tracking-widest mb-1" style={{fontSize:"8px"}}>
+                                  {isIngreso ? "Ventas registradas" : "Gastos registrados"} — {fila.fecha}
+                                </div>
+                                {entradas.map(item => {
+                                  const total = isIngreso
+                                    ? METODOS.reduce((a, m) => a + (+item[m.key] || 0), 0)
+                                    : +item.monto || 0;
+                                  return (
+                                    <div key={item.id} className="flex items-center gap-2 border-b border-gray-800/40 py-0.5 last:border-b-0">
+                                      <span className="text-gray-600 font-mono shrink-0" style={{fontSize:"9px"}}>{item.hora}</span>
+                                      <span className="text-gray-300 flex-1 truncate" style={{fontSize:"9px"}}>{item.concepto || item.descripcion || "—"}</span>
+                                      {!isIngreso && <span className="text-gray-500 shrink-0" style={{fontSize:"9px"}}>{item.caja}</span>}
+                                      <span className={`font-mono font-bold shrink-0 ${isIngreso?"text-emerald-400":"text-red-400"}`} style={{fontSize:"9px"}}>
+                                        {$(total)}
+                                      </span>
+                                      <button
+                                        onClick={() => eliminarEntradaDia(fila.fecha, fila.tipo, item.id)}
+                                        className="text-gray-700 hover:text-red-400 transition-all shrink-0"
+                                        title="Eliminar entrada">
+                                        <Ic d={ICONS.trash} s={9}/>
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return rows;
                     });
                   })()}
 
@@ -2534,6 +2596,7 @@ const S = { // styles
                       <td className="border-r border-gray-700/30 py-1" style={{height:18}}/>
                       <td className="border-r border-gray-700/30"/>
                       {METODOS.map(m=><td key={m.key} className="border-r border-gray-700/20 last:border-r-0"/>)}
+                      <td/>
                     </tr>
                   ))}
                 </tbody>
@@ -2548,6 +2611,7 @@ const S = { // styles
                         {totV[m.key]>0?fmtK(totV[m.key]):"—"}
                       </td>
                     ))}
+                    <td/>
                   </tr>
                   {/* Egresos totales */}
                   <tr className="border-t border-gray-700/50 bg-red-900/20">
@@ -2559,6 +2623,7 @@ const S = { // styles
                         {totG[m.key]>0?fmtK(totG[m.key]):"—"}
                       </td>
                     ))}
+                    <td/>
                   </tr>
                   {/* Total Saldo */}
                   <tr className="border-t-2 border-gray-500 bg-gray-800/80">
@@ -2573,6 +2638,7 @@ const S = { // styles
                         </td>
                       );
                     })}
+                    <td/>
                   </tr>
                   {/* Saldo total global */}
                   {(() => {
@@ -2584,7 +2650,7 @@ const S = { // styles
                         <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
                           Saldo Total
                         </td>
-                        <td colSpan={METODOS.length} className="px-2 py-1 text-right font-mono font-bold"
+                        <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
                           style={{fontSize:"11px", color: saldo>0?"#93c5fd":saldo<0?"#f87171":"#374151"}}>
                           {saldo!==0 ? fmtK(saldo) : "—"}
                         </td>
