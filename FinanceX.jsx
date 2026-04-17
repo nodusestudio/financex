@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { collection, addDoc, doc, deleteDoc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, addDoc, doc, deleteDoc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
 import ViewMetricas from "./src/ViewMetricas.jsx";
 import * as XLSX from "xlsx";
@@ -54,6 +54,7 @@ const ICONS = {
   right: "M9 18l6-6-6-6",
   up:    "M12 19V5M5 12l7-7 7 7",
   down:  "M12 5v14M19 12l-7 7-7-7",
+  pencil: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z",
   cashRegister: "M4 4h16v2H4V4zm2 2v2h12V6H6zm0 4v8h12v-8H6zm2 2h8v4H8v-4zM8 14v2h8v-2H8z", // caja registradora
   notebook: "M4 4h12v16H4V4zm2 2v12h8V6H6zm10 0v14H6v2h10V6z", // libreta
 };
@@ -1116,6 +1117,8 @@ const S = { // styles
     const [mesExport, setMesExport] = useState(todayStr().slice(0, 7));
     const [mesDetalle, setMesDetalle] = useState(null);
     const [diaDetalle, setDiaDetalle] = useState(null); // fecha string
+    const [filtroTemporal, setFiltroTemporal] = useState("mes");
+    const [diaExpandido, setDiaExpandido] = useState(null);
     const fmtC = n => $(n || 0);
     // Única declaración de diasFiltrados, protegida
     const diasFiltrados = useMemo(() => {
@@ -1124,6 +1127,27 @@ const S = { // styles
         .filter(([fecha]) => typeof mesExport === 'string' && fecha.startsWith(mesExport))
         .map(([fecha, dia]) => ({ fecha, ...dia }));
     }, [historial, mesExport]);
+    const entradasFiltradas = useMemo(() => {
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      return Object.entries(historial || {}).filter(([fecha]) => {
+        const d = new Date(fecha + "T12:00:00");
+        if (filtroTemporal === "3dias") return (hoy - d) / 86400000 <= 2;
+        if (filtroTemporal === "semana") {
+          const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
+          return d >= lunes;
+        }
+        if (filtroTemporal === "mes") return fecha.startsWith(new Date().toISOString().slice(0,7));
+        if (filtroTemporal === "año") return fecha.startsWith(String(new Date().getFullYear()));
+        return true;
+      }).sort(([a],[b]) => b.localeCompare(a));
+    }, [historial, filtroTemporal]);
+    const totalFiltrados = useMemo(() =>
+      entradasFiltradas.reduce((acc, [, dia]) => {
+        const ingr = (dia.ventas||[]).reduce((s,v) => s + METODOS.reduce((a,m) => a + (+v[m.key]||0), 0), 0);
+        const egr  = (dia.gastos||[]).reduce((s,g) => s + (+g.monto||0), 0);
+        return { ingr: acc.ingr + ingr, egr: acc.egr + egr };
+      }, { ingr: 0, egr: 0 }),
+    [entradasFiltradas]);
     // Memo para meses
     const meses = useMemo(() => Object.values(mesesGuardados).sort((a,b)=>b.mes.localeCompare(a.mes)), [mesesGuardados]);
     // Memo para exportación
@@ -1353,13 +1377,33 @@ const S = { // styles
       );
     }
 
-    // ── Libro contable ─────────────────────────────────────────────────────
+    // ── Vista principal ────────────────────────────────────────────────────
 
     return (
       <div className="space-y-4">
-        {/* Controles de exportación */}
-        <div className={`${S.card} px-4 py-3`}>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
+
+        {/* ── FILTROS TEMPORALES + CONTROLES EXPORT ── */}
+        <div className={`${S.card} px-4 py-3 space-y-3`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-600 uppercase tracking-wider shrink-0">Período:</span>
+            {[
+              {key:"3dias",  label:"Últimos 3 días"},
+              {key:"semana", label:"Esta semana"},
+              {key:"mes",    label:"Este mes"},
+              {key:"año",    label:"Año en curso"},
+            ].map(f => (
+              <button key={f.key}
+                onClick={() => setFiltroTemporal(f.key)}
+                className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                  filtroTemporal === f.key
+                    ? "bg-blue-700 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white"
+                }`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap border-t border-gray-800/50 pt-3">
             <input
               type="month"
               value={mesExport}
@@ -1388,54 +1432,129 @@ const S = { // styles
           </div>
         </div>
 
-        {meses.length === 0 ? (
-          <div className={`${S.card} py-12 text-center`}>
-            <div className="text-4xl mb-2">📚</div>
-            <div className="text-gray-400 text-sm mb-1 font-semibold">Sin registros guardados</div>
-            <div className="text-gray-600 text-xs">Guarda un mes desde <strong>Caja Diaria → Ventas del Mes</strong></div>
+        {/* ── RESUMEN DEL PERÍODO ── */}
+        {entradasFiltradas.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-emerald-900/20 border border-emerald-700/30 rounded-xl px-3 py-2.5 text-center">
+              <div className="text-emerald-400 font-mono font-bold text-sm">{fmtC(totalFiltrados.ingr)}</div>
+              <div className="text-gray-600 text-xs mt-0.5">Ingresos</div>
+            </div>
+            <div className="bg-red-900/20 border border-red-700/30 rounded-xl px-3 py-2.5 text-center">
+              <div className="text-red-400 font-mono font-bold text-sm">{fmtC(totalFiltrados.egr)}</div>
+              <div className="text-gray-600 text-xs mt-0.5">Egresos</div>
+            </div>
+            <div className={`${(totalFiltrados.ingr-totalFiltrados.egr)>=0?"bg-blue-900/20 border-blue-700/30":"bg-red-900/20 border-red-700/30"} border rounded-xl px-3 py-2.5 text-center`}>
+              <div className={`font-mono font-bold text-sm ${(totalFiltrados.ingr-totalFiltrados.egr)>=0?"text-blue-400":"text-red-400"}`}>{fmtC(totalFiltrados.ingr-totalFiltrados.egr)}</div>
+              <div className="text-gray-600 text-xs mt-0.5">Neto</div>
+            </div>
+          </div>
+        )}
+
+        {/* ── AUDITORÍA POR DÍA ── */}
+        {entradasFiltradas.length === 0 ? (
+          <div className={`${S.card} py-10 text-center`}>
+            <div className="text-gray-600 text-sm">Sin entradas para el período seleccionado</div>
           </div>
         ) : (
+          <div className={`${S.card} overflow-hidden`}>
+            <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
+              <colgroup>
+                <col style={{width:100}}/><col style={{width:88}}/><col style={{width:88}}/><col style={{width:88}}/><col/><col style={{width:24}}/>
+              </colgroup>
+              <thead>
+                <tr className="bg-gray-900/60 border-b border-gray-700">
+                  {["Fecha","Ingresos","Egresos","Neto","Día",""].map(h=>(
+                    <th key={h} className="px-2 py-2 text-left text-gray-500 font-semibold uppercase tracking-wider border-r border-gray-700/50 last:border-r-0" style={{fontSize:"9px"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {entradasFiltradas.flatMap(([fecha, dia]) => {
+                  const ingr = (dia.ventas||[]).reduce((s,v) => s + METODOS.reduce((a,m) => a + (+v[m.key]||0), 0), 0);
+                  const egr  = (dia.gastos||[]).reduce((s,g) => s + (+g.monto||0), 0);
+                  const neto = ingr - egr;
+                  const gastos = dia.gastos || [];
+                  const expanded = diaExpandido === fecha;
+                  const dObj = new Date(fecha + "T12:00:00");
+                  const nomDia = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"][dObj.getDay()];
+                  const mainRow = (
+                    <tr key={fecha}
+                      className="border-b border-gray-700/30 hover:bg-gray-800/20 transition-colors"
+                      style={{background: expanded ? "#111820" : undefined}}>
+                      <td className="px-2 py-1.5 text-gray-400 font-mono border-r border-gray-700/30" style={{fontSize:"10px"}}>{fecha}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-emerald-400 border-r border-gray-700/30" style={{fontSize:"10px"}}>{ingr>0?fmtC(ingr):"—"}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-red-400 border-r border-gray-700/30" style={{fontSize:"10px"}}>{egr>0?fmtC(egr):"—"}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono font-bold border-r border-gray-700/30 ${neto>=0?"text-blue-400":"text-red-400"}`} style={{fontSize:"10px"}}>{fmtC(neto)}</td>
+                      <td className="px-2 py-1.5 text-gray-300 font-semibold border-r border-gray-700/30" style={{fontSize:"10px"}}>{nomDia}</td>
+                      <td className="px-1 py-1.5 text-center">
+                        {gastos.length > 0 && (
+                          <button
+                            onClick={() => setDiaExpandido(expanded ? null : fecha)}
+                            className="text-gray-500 hover:text-blue-400 transition-colors"
+                            title={expanded ? "Ocultar egresos" : "Ver detalle egresos"}>
+                            <Ic d={expanded ? ICONS.up : ICONS.down} s={10}/>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                  if (!expanded || gastos.length === 0) return [mainRow];
+                  return [mainRow, ...gastos.map(g => {
+                    const m = METODOS.find(x=>x.key===g.caja)||METODOS[0];
+                    return (
+                      <tr key={`${fecha}-eg-${g.id}`}
+                        className="border-b border-gray-700/20"
+                        style={{background:"#1a0808"}}>
+                        <td className="pl-5 pr-1 py-1 text-gray-600 font-mono border-r border-gray-700/20" style={{fontSize:"9px"}}>↳ {g.hora||"—"}</td>
+                        <td colSpan={2} className="px-2 py-1 text-gray-300 border-r border-gray-700/20 truncate" style={{fontSize:"9px"}}>{g.concepto||"—"}</td>
+                        <td className="px-2 py-1 text-right font-mono text-red-400 border-r border-gray-700/20" style={{fontSize:"9px"}}>−{fmtC(g.monto)}</td>
+                        <td className="px-2 py-1 border-r border-gray-700/20" style={{fontSize:"9px"}}>
+                          <span style={{color:m.color}}>{m.label}</span>
+                          {g.categoria && <span className="text-gray-700 ml-1">· {g.categoria}</span>}
+                        </td>
+                        <td/>
+                      </tr>
+                    );
+                  })];
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── LIBRO CONTABLE (MESES GUARDADOS) ── */}
+        {meses.length > 0 && (
           <div className="space-y-2">
-            {/* Cabecera */}
             <div className="px-4 py-3 bg-gradient-to-r from-gray-900 to-gray-800 border border-gray-700 rounded-t-2xl">
               <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">📖 Libro Contable</div>
               <div className="text-sm text-gray-400">{meses.length} {meses.length===1?"mes guardado":"meses guardados"}</div>
             </div>
 
-            {/* Filas de meses */}
-            {meses.map((mg, idx) => {
+            {meses.map((mg) => {
               const totalIngr = METODOS.reduce((a,m)=>a+(mg.totV[m.key]||0),0);
               const totalEgr  = METODOS.reduce((a,m)=>a+(mg.totG[m.key]||0),0);
               const saldo     = totalIngr - totalEgr;
               return (
                 <div key={mg.mes}
                   className={`${S.card} px-4 py-3 flex items-center justify-between gap-3 hover:border-blue-600/50 transition-all group`}>
-
-                  {/* Información del mes */}
                   <div className="flex-1 min-w-0">
                     <div className="text-white font-bold capitalize text-sm mb-0.5">{mg.nombre}</div>
                     <div className="text-xs text-gray-500">Guardado {mg.savedAt}</div>
                   </div>
-
-                  {/* Tarjetas de resumen */}
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-emerald-900/20 border border-emerald-700/30 rounded-lg px-2 py-1.5 text-center">
                       <div className="text-emerald-400 font-mono font-bold text-xs">{fmtC(totalIngr)}</div>
                       <div className="text-gray-600 text-xs mt-0.5">Ingr.</div>
                     </div>
-                    
                     <div className="bg-red-900/20 border border-red-700/30 rounded-lg px-2 py-1.5 text-center">
                       <div className="text-red-400 font-mono font-bold text-xs">{fmtC(totalEgr)}</div>
                       <div className="text-gray-600 text-xs mt-0.5">Egr.</div>
                     </div>
-                    
-                    <div className={`bg-blue-900/20 border border-blue-700/30 rounded-lg px-2 py-1.5 text-center`}>
+                    <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg px-2 py-1.5 text-center">
                       <div className={`font-mono font-bold text-xs ${saldo>=0?"text-blue-400":"text-red-400"}`}>{fmtC(saldo)}</div>
                       <div className="text-gray-600 text-xs mt-0.5">{saldo>=0?"Sup":"Def"}</div>
                     </div>
                   </div>
-
-                  {/* Botones */}
                   <div className="flex gap-1.5 shrink-0">
                     <button onClick={()=>setMesDetalle(mg)}
                       className="px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-xs font-semibold transition-colors">
@@ -1451,7 +1570,6 @@ const S = { // styles
               );
             })}
 
-            {/* Fila de resumen final */}
             {meses.length > 1 && (
               <div className={S.card}>
                 <div className="px-4 py-3 flex items-center justify-between gap-3">
@@ -1673,6 +1791,8 @@ const S = { // styles
     const [savedConteoMsg, setSavedConteoMsg] = useState(false);
     // Panel ingresos/egresos
     const [panelOpen, setPanelOpen] = useState({ Ingresos: true, Egresos: true });
+    const [editandoMov, setEditandoMov] = useState(null);
+    const [editCampos, setEditCampos] = useState({});
     // Guardado automático temporal en Firebase para gastos internos
     useEffect(() => {
       const tempGI = {
@@ -1977,6 +2097,20 @@ const S = { // styles
       return { ingr, egr, neto: ingr - egr };
     }, [historial, fechaI]);
 
+    const editarMovGuardado = (mov) => {
+      const fecha = mov.fecha;
+      const tipo = mov._tipo === "venta" ? "ventas" : "gastos";
+      setHistorial(h => {
+        const dia = h[fecha] || { ventas: [], gastos: [] };
+        return { ...h, [fecha]: { ...dia, [tipo]: dia[tipo].map(item =>
+          item.id !== mov.id ? item :
+          tipo === "ventas" ? { ...item, concepto: editCampos.concepto } :
+          { ...item, concepto: editCampos.concepto, monto: +editCampos.monto || item.monto }
+        )}};
+      });
+      setEditandoMov(null);
+    };
+
     return (
       <div className="space-y-3">
         <style>{`.fodexa-scroll::-webkit-scrollbar{width:3px}.fodexa-scroll::-webkit-scrollbar-track{background:transparent}.fodexa-scroll::-webkit-scrollbar-thumb{background:#25252E;border-radius:4px}.fodexa-scroll::-webkit-scrollbar-thumb:hover{background:#374151}`}</style>
@@ -2031,10 +2165,10 @@ const S = { // styles
         </div>
 
         {/* Layout: [registro 30%] | [movimientos 70%] */}
-        <div className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:grid-cols-[430px_1fr] lg:overflow-visible lg:gap-3">
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:grid-cols-[490px_1fr] lg:overflow-visible lg:gap-3">
 
           {/* Columna izquierda: ambas tablas + botón registrar */}
-          <div className="shrink-0 flex flex-col gap-2 rounded-2xl p-2" style={{width:426, background:"#0d0d10", border:"1px solid rgba(255,255,255,0.04)", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.03)"}}>
+          <div className="shrink-0 flex flex-col gap-2 rounded-2xl p-2" style={{minWidth:360, background:"#0d0d10", border:"1px solid rgba(255,255,255,0.04)", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.03)"}}>
             <datalist id="datalist-conceptos-egreso">
               {conceptosEgreso.map(c => <option key={c} value={c}/>)}
             </datalist>
@@ -2075,7 +2209,7 @@ const S = { // styles
                       <colgroup>
                         {cfg.sinConcepto
                           ? <><col style={{width:"58%"}}/><col style={{width:"42%"}}/></>
-                          : <><col style={{width:"30%"}}/><col style={{width:"40%"}}/><col style={{width:"30%"}}/></>
+                          : <><col style={{width:"18%"}}/><col style={{width:"52%"}}/><col style={{width:"30%"}}/></>
                         }
                       </colgroup>
                       <thead>
@@ -2555,7 +2689,7 @@ const S = { // styles
             <div className="overflow-y-auto max-h-[600px] fodexa-scroll" style={{scrollbarWidth:"thin",scrollbarColor:"#25252E transparent"}}>
             <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
               <colgroup>
-                <col style={{width:46}}/><col style={{width:62}}/><col/><col style={{width:110}}/><col style={{width:76}}/><col style={{width:36,minWidth:36,maxWidth:36}}/>
+                <col style={{width:46}}/><col style={{width:62}}/><col/><col style={{width:110}}/><col style={{width:76}}/><col style={{width:52,minWidth:52,maxWidth:52}}/>
               </colgroup>
               <thead>
                 <tr className="sticky top-0 z-10 border-b border-gray-800/70" style={{background:"#1a1a21"}}>
@@ -2590,22 +2724,45 @@ const S = { // styles
                           {isIngreso ? "↑ Ingreso" : "↓ Egreso"}
                         </span>
                       </td>
-                      <td className="px-2 py-1.5 text-sm text-gray-300 truncate border-r border-gray-800/40">{mov.concepto || mov.descripcion || "—"}</td>
+                      <td className="px-2 py-1.5 text-sm text-gray-300 truncate border-r border-gray-800/40">
+                        {editandoMov === mov.id
+                          ? <input autoFocus className="w-full bg-transparent text-sm text-gray-200 focus:outline-none border-b border-blue-500/50" value={editCampos.concepto} onChange={e=>setEditCampos(c=>({...c,concepto:e.target.value}))}/>
+                          : (mov.concepto || mov.descripcion || "—")}
+                      </td>
                       <td className="px-2 py-1.5 border-r border-gray-800/40">
                         <span className="bg-[#0f1629] border border-blue-800/50 px-2 py-0.5 rounded-full font-medium text-blue-200 uppercase tracking-wide" style={{fontSize:"9px"}}>
                           {mov.categoria || (isIngreso ? "Ventas" : "—")}
                         </span>
                       </td>
                       <td className={`px-2 py-1.5 text-right font-mono font-bold border-r border-gray-800/40 ${isIngreso ? "text-emerald-400" : "text-red-400"}`} style={{fontSize:"11px"}}>
-                        {isIngreso ? `+${$(Number(mov.total || 0))}` : `−${$(Number(mov.monto || 0))}`}
+                        {editandoMov === mov.id
+                          ? <input type="number" className="w-full bg-transparent text-right font-mono font-bold focus:outline-none border-b border-blue-500/50" style={{color:isIngreso?"#34d399":"#f87171",fontSize:"11px"}} value={editCampos.monto} onChange={e=>setEditCampos(c=>({...c,monto:e.target.value}))}/>
+                          : (isIngreso ? `+${$(Number(mov.total || 0))}` : `−${$(Number(mov.monto || 0))}`)}
                       </td>
-                      <td className="px-1 py-1.5 text-center overflow-hidden" style={{width:40,minWidth:40,maxWidth:40}}>
-                        <button
-                          onClick={() => handleDelete(mov.id)}
-                          className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all"
-                          title="Eliminar movimiento">
-                          <Ic d={ICONS.trash} s={12}/>
-                        </button>
+                      <td className="px-1 py-1.5 text-center overflow-hidden" style={{width:52,minWidth:52,maxWidth:52}}>
+                        <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                          {editandoMov === mov.id ? (
+                            <button
+                              onClick={() => editarMovGuardado(mov)}
+                              className="text-gray-600 hover:text-emerald-400 transition-all"
+                              title="Guardar cambios">
+                              <Ic d={ICONS.check} s={11}/>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => { setEditandoMov(mov.id); setEditCampos({ concepto: mov.concepto || mov.descripcion || "", monto: mov.total || mov.monto || 0 }); }}
+                              className="text-gray-600 hover:text-blue-400 transition-all"
+                              title="Editar movimiento">
+                              <Ic d={ICONS.pencil} s={11}/>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDelete(mov.id)}
+                            className="text-gray-600 hover:text-red-400 transition-all"
+                            title="Eliminar movimiento">
+                            <Ic d={ICONS.trash} s={11}/>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
