@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinanceX - Recuperador de Datos</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+            color: #e5e7eb;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #3b82f6;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        h2 {
+            color: #10b981;
+            margin: 20px 0 10px 0;
+            font-size: 18px;
+        }
+        .alert {
+            background: #7c2d12;
+            border-left: 4px solid #f97316;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        .alert.success {
+            background: #05381c;
+            border-left-color: #10b981;
+        }
+        .alert.info {
+            background: #0c1a3a;
+            border-left-color: #3b82f6;
+        }
+        textarea, input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            background: #111827;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            color: #e5e7eb;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            resize: vertical;
+            margin: 10px 0;
+        }
+        textarea { height: 200px; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+            margin: 8px 8px 8px 0;
+        }
+        button:hover { background: #2563eb; transform: translateY(-2px); }
+        button.danger { background: #dc2626; }
+        button.danger:hover { background: #b91c1c; }
+        button.success { background: #10b981; }
+        button.success:hover { background: #059669; }
+        .status {
+            background: #111827;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            color: #10b981;
+        }
+        .section {
+            margin: 20px 0;
+        }
+        code {
+            background: #111827;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #fbbf24;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🔧 Recuperador de Datos FinanceX</h1>
+            <p style="color: #9ca3af; margin-bottom: 16px;">Herramienta para recuperar y restaurar datos perdidos o corruptos.</p>
+            
+            <div class="alert">
+                ⚠️ Esta herramienta manipula directamente el almacenamiento local. Úsala con cuidado.
+            </div>
+        </div>
+
+        <!-- Tab 1: Ver Datos Actuales -->
+        <div class="card">
+            <h2>📊 1. Ver Datos Actuales en el Navegador</h2>
+            <p style="color: #d1d5db; margin-bottom: 16px;">Comprueba qué datos tienes guardados en this navegador.</p>
+            
+            <button class="success" onclick="verDatos()">🔍 Mostrar Datos Locales</button>
+            <button onclick="verBackup()">📦 Mostrar Backup</button>
+            
+            <div id="statusDatos" class="status" style="display: none;"></div>
+        </div>
+
+        <!-- Tab 2: Importar Datos -->
+        <div class="card">
+            <h2>📥 2. Restaurar desde Archivo JSON</h2>
+            <p style="color: #d1d5db; margin-bottom: 16px;">Si tienes un archivo de backup JSON, cárgalo aquí para restaurar.</p>
+            
+            <input type="file" id="archivoJSON" accept=".json" />
+            <button onclick="importarJSON()">📁 Cargar JSON</button>
+            
+            <label class="section">
+                <strong>O pega el contenido JSON aquí:</strong>
+                <textarea id="jsonPaste" placeholder='{ "historial": {...}, "mesesGuardados": {...} }'></textarea>
+            </label>
+            
+            <button class="success" onclick="restaurarDesdeJSON()">✓ Restaurar Datos</button>
+            
+            <div id="statusRestore" class="status" style="display: none;"></div>
+        </div>
+
+        <!-- Tab 3: Descargar Backup -->
+        <div class="card">
+            <h2>⬇️ 3. Descargar Backup Actual</h2>
+            <p style="color: #d1d5db; margin-bottom: 16px;">Guarda una copia de seguridad de tus datos actuales.</p>
+            
+            <button class="success" onclick="descargarBackup()">💾 Descargar Backup JSON</button>
+            <button onclick="copiarAlPortapapeles()">📋 Copiar al Portapapeles</button>
+            
+            <div id="statusBackup" class="status" style="display: none;"></div>
+        </div>
+
+        <!-- Tab 4: Limpiar Datos -->
+        <div class="card">
+            <h2>🗑️ 4. Operaciones Avanzadas</h2>
+            <p style="color: #d1d5db; margin-bottom: 16px;">Acciones que requieren confirmación.</p>
+            
+            <button class="danger" onclick="limpiarDatos()">🗑️ Borrar Todos los Datos Locales</button>
+            <button class="danger" onclick="resetearBackup()">🔄 Resetear Backup</button>
+            <button onclick="validarIntegridad()">✓ Validar Integridad de Datos</button>
+            
+            <div id="statusAdvanced" class="status" style="display: none;"></div>
+        </div>
+
+        <!-- Info Técnica -->
+        <div class="card" style="background: #0f172a; border-color: #1e293b;">
+            <h2>ℹ️ Información Técnica</h2>
+            <div style="color: #cbd5e1; font-size: 12px; font-family: monospace; line-height: 1.6;">
+                <div><strong>Clave de almacenamiento principal:</strong> <code>financex_app_data_v1</code></div>
+                <div><strong>Clave de backup:</strong> <code>financex_backup_datos</code></div>
+                <div><strong>Navegador:</strong> <span id="browserInfo">Detectando...</span></div>
+                <div><strong>Espacio disponible:</strong> <span id="storageInfo">Detectando...</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MAIN_KEY = 'financex_app_data_v1';
+        const BACKUP_KEY = 'financex_backup_datos';
+
+        function log(elementId, msg, tipo = 'info') {
+            const el = document.getElementById(elementId);
+            const color = tipo === 'error' ? '#f87171' : tipo === 'success' ? '#10b981' : '#60a5fa';
+            const timestamp = new Date().toLocaleTimeString('es-CO');
+            el.innerHTML += `<div style="color: ${color};">[${timestamp}] ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function verDatos() {
+            const el = document.getElementById('statusDatos');
+            el.style.display = 'block';
+            el.innerHTML = '';
+
+            try {
+                const datos = localStorage.getItem(MAIN_KEY);
+                if (!datos) {
+                    log('statusDatos', '❌ No hay datos guardados en ' + MAIN_KEY, 'error');
+                    return;
+                }
+
+                const parsed = JSON.parse(datos);
+                const diasCount = Object.keys(parsed.historial || {}).length;
+                const mesesCount = Object.keys(parsed.mesesGuardados || {}).length;
+
+                log('statusDatos', `✅ Datos encontrados:`, 'success');
+                log('statusDatos', `📅 Días registrados: ${diasCount}`);
+                log('statusDatos', `📊 Meses guardados: ${mesesCount}`);
+                log('statusDatos', `⏰ Última actualización: ${parsed.updatedAt || 'no registrado'}`);
+                log('statusDatos', `\n📋 JSON completo:\n${JSON.stringify(parsed, null, 2)}`);
+            } catch (err) {
+                log('statusDatos', `❌ Error al leer datos: ${err.message}`, 'error');
+            }
+        }
+
+        function verBackup() {
+            const el = document.getElementById('statusDatos');
+            el.style.display = 'block';
+            el.innerHTML = '';
+
+            try {
+                const backup = localStorage.getItem(BACKUP_KEY);
+                if (!backup) {
+                    log('statusDatos', '❌ No hay backup guardado', 'error');
+                    return;
+                }
+
+                const parsed = JSON.parse(backup);
+                log('statusDatos', `✅ Backup encontrado:`, 'success');
+                log('statusDatos', `\n${JSON.stringify(parsed, null, 2)}`);
+            } catch (err) {
+                log('statusDatos', `❌ Error: ${err.message}`, 'error');
+            }
+        }
+
+        function importarJSON() {
+            const file = document.getElementById('archivoJSON').files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    document.getElementById('jsonPaste').value = JSON.stringify(json, null, 2);
+                    log('statusRestore', `✅ Archivo cargado: ${file.name}`, 'success');
+                } catch (err) {
+                    log('statusRestore', `❌ Error al parsear JSON: ${err.message}`, 'error');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function restaurarDesdeJSON() {
+            const el = document.getElementById('statusRestore');
+            el.style.display = 'block';
+            el.innerHTML = '';
+
+            try {
+                const jsonStr = document.getElementById('jsonPaste').value;
+                if (!jsonStr.trim()) {
+                    log('statusRestore', '❌ Pega un JSON válido', 'error');
+                    return;
+                }
+
+                const datos = JSON.parse(jsonStr);
+
+                if (!datos.historial) {
+                    log('statusRestore', '❌ El JSON no tiene estructura válida (falta "historial")', 'error');
+                    return;
+                }
+
+                if (!confirm('⚠️ Esto sobrescribirá los datos actuales. ¿Continuar?')) {
+                    log('statusRestore', '❌ Operación cancelada', 'error');
+                    return;
+                }
+
+                localStorage.setItem(MAIN_KEY, JSON.stringify(datos));
+                log('statusRestore', `✅ Datos restaurados correctamente`, 'success');
+                log('statusRestore', `📅 Días: ${Object.keys(datos.historial).length}`);
+                log('statusRestore', `⏰ Ahora debes recargar la página (F5) para ver los cambios`, 'success');
+            } catch (err) {
+                log('statusRestore', `❌ Error: ${err.message}`, 'error');
+            }
+        }
+
+        function descargarBackup() {
+            const el = document.getElementById('statusBackup');
+            el.style.display = 'block';
+            el.innerHTML = '';
+
+            try {
+                const datos = localStorage.getItem(MAIN_KEY);
+                if (!datos) {
+                    log('statusBackup', '❌ No hay datos para descargar', 'error');
+                    return;
+                }
+
+                const blob = new Blob([datos], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `financex-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                log('statusBackup', `✅ Backup descargado`, 'success');
+                log('statusBackup', `📁 Archivo: ${a.download}`);
+            } catch (err) {
+                log('statusBackup', `❌ Error: ${err.message}`, 'error');
+            }
+        }
+
+        function copiarAlPortapapeles() {
+            const el = document.getElementById('statusBackup');
+            el.style.display = 'block';
+            el.innerHTML = '';
+
+            try {
+                const datos = localStorage.getItem(MAIN_KEY);
+                if (!datos) {
+                    log('statusBackup', '❌ No hay datos', 'error');
+                    return;
+                }
+
+                navigator.clipboard.writeText(datos).then(() => {
+                    log('statusBackup', `✅ Datos copiados al portapapeles`, 'success');
+                    log('statusBackup', `📋 Ahora puedes pegarlo en un archivo .json o en otro lugar`);
+                });
+            } catch (err) {
+                log('statusBackup', `❌ Error: ${err.message}`, 'error');
+            }
+        }
+
+        function limpiarDatos() {
+            if (!confirm('⚠️ PELIGRO: Esto BORRARÁ TODOS los datos. ¿Está seguro?')) return;
+            if (!confirm('⚠️ Confirmar de nuevo: Esta acción es IRREVERSIBLE. ¿Continuar?')) return;
+
+            localStorage.removeItem(MAIN_KEY);
+            localStorage.removeItem(BACKUP_KEY);
+            log('statusAdvanced', `✅ Datos borrados`, 'success');
+            log('statusAdvanced', `🔄 Recarga la página para ver los cambios`);
+        }
+
+        function resetearBackup() {
+            if (!confirm('Resetear backup?')) return;
+            localStorage.removeItem(BACKUP_KEY);
+            log('statusAdvanced', `✅ Backup reseteado`);
+        }
+
+        function validarIntegridad() {
+            const el = document.getElementById('statusAdvanced');
+            el.style.display = 'block';
+            el.innerHTML = '';
+
+            try {
+                const datos = localStorage.getItem(MAIN_KEY);
+                if (!datos) {
+                    log('statusAdvanced', '❌ Sin datos para validar', 'error');
+                    return;
+                }
+
+                const parsed = JSON.parse(datos);
+                let errors = [];
+
+                if (!parsed.historial || typeof parsed.historial !== 'object') errors.push('historial inválido');
+                if (!parsed.mesesGuardados || typeof parsed.mesesGuardados !== 'object') errors.push('mesesGuardados inválido');
+                if (!parsed.conteo || typeof parsed.conteo !== 'object') errors.push('conteo inválido');
+
+                if (errors.length === 0) {
+                    log('statusAdvanced', `✅ Estructura válida`, 'success');
+                    log('statusAdvanced', `📊 Historial: ${Object.keys(parsed.historial).length} días`);
+                    log('statusAdvanced', `📊 Meses: ${Object.keys(parsed.mesesGuardados).length}`);
+                } else {
+                    log('statusAdvanced', `❌ Errores encontrados:`, 'error');
+                    errors.forEach(e => log('statusAdvanced', `  • ${e}`, 'error'));
+                }
+            } catch (err) {
+                log('statusAdvanced', `❌ JSON inválido: ${err.message}`, 'error');
+            }
+        }
+
+        // Info sistema
+        window.addEventListener('load', () => {
+            document.getElementById('browserInfo').textContent = 
+                `${navigator.userAgent.substring(0, 50)}...`;
+            
+            if (navigator.storage && navigator.storage.estimate) {
+                navigator.storage.estimate().then(({usage, quota}) => {
+                    const percent = ((usage / quota) * 100).toFixed(1);
+                    document.getElementById('storageInfo').textContent = 
+                        `${(usage/1024/1024).toFixed(2)}MB / ${(quota/1024/1024).toFixed(0)}MB (${percent}%)`;
+                });
+            }
+        });
+    </script>
+</body>
+</html>

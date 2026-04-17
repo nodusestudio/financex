@@ -1,16 +1,19 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { collection, addDoc, doc, deleteDoc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
 import ViewMetricas from "./src/ViewMetricas.jsx";
 import * as XLSX from "xlsx";
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
-const $ = (n) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n || 0);
+const STORAGE_KEY = "financex_app_data_v1";
+const _fmtCOP = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+const _fmtNum = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
+const $ = (n) => _fmtCOP.format(n || 0);
 const formatMoneyInput = (v) => {
   if (v === "" || v === null || typeof v === "undefined") return "";
   const n = +v || 0;
   if (!n) return "";
-  return `$ ${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(n)}`;
+  return `$ ${_fmtNum.format(n)}`;
 };
 const parseMoneyInput = (raw) => {
   const clean = String(raw || "").replace(/[^\d]/g, "");
@@ -30,6 +33,8 @@ const METODOS = [
 ];
 
 const CAJAS_GASTO = ["efectivo", "bancolombia", "nequi", "bold", "aliados"];
+
+const CATEGORIAS_EGRESO = ["Insumos", "Nómina", "Servicios Públicos", "Marketing", "Mantenimiento", "Otros"];
 
 const BILLETES = [100000, 50000, 20000, 10000, 5000, 2000, 1000];
 const MONEDAS  = [500, 200, 100, 50];
@@ -62,7 +67,7 @@ const Pill = ({ label, color, bg }) => (
 const Sheet = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
     onClick={onClose}>
-    <div className="bg-gray-900 rounded-t-2xl border-t border-gray-700 max-h-[85vh] overflow-y-auto"
+    <div className="rounded-t-2xl border-t border-gray-800/60 max-h-[85vh] overflow-y-auto" style={{background:"#16161D"}}
       onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
         <span className="font-semibold text-white text-sm">{title}</span>
@@ -74,9 +79,7 @@ const Sheet = ({ title, onClose, children }) => (
 );
 
 const Lbl = ({ children }) => <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{children}</label>;
-const inp = "w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-gray-600";
-const btn = (color) => `w-full py-3 rounded-xl text-sm font-semibold transition-all text-white`;
-
+const inp = "w-full bg-[#16161D] border border-gray-800/40 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500/70 focus:ring-2 focus:ring-orange-500/15 transition-all placeholder-gray-600";
 // ════════════════════════════════════════════════════════════════════════════
 // APP
 // ════════════════════════════════════════════════════════════════════════════
@@ -85,9 +88,9 @@ export default function FinanceX() {
   const [tab, setTab] = useState("cajaDiaria");
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Cargando nube...");
-  const STORAGE_KEY = "financex_app_data_v1";
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [canInstallApp, setCanInstallApp] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
 
   // Historial de días: { [fecha]: { ventas: [...], gastos: [...] } }
   const [historial, setHistorial] = useState({});
@@ -114,7 +117,7 @@ export default function FinanceX() {
 
   // Forms
   const [fVenta, setFVenta] = useState({ concepto: "", fecha: todayStr(), ...Object.fromEntries(METODOS.map(m => [m.key, ""])) });
-  const [fGasto, setFGasto] = useState({ concepto: "", monto: "", caja: "efectivo", categoria: "domicilio" });
+  const [fGasto, setFGasto] = useState({ concepto: "", monto: "", caja: "efectivo", categoria: "Otros", descripcion: "" });
 
   const TODAY = todayStr();
   const BACKUP_KEY = "financex_backup_datos";
@@ -169,94 +172,123 @@ export default function FinanceX() {
     setMostrarRecuperar(false);
   };
 
-  const descargarBackup = () => {
-    const data = {
-      historial,
-      mesesGuardados,
-      conteo,
-      timestamp: new Date().toISOString(),
-    };
-    
-    // Preparar datos para Excel
-    const hojas = [];
-    
+  const descargarBackup = async () => {
+    if (exportingBackup) return;
+    setExportingBackup(true);
+    try {
+    // Intentar obtener datos frescos desde Firestore para máxima completitud
+    let datosHistorial = historial;
+    let datosMeses = mesesGuardados;
+    try {
+      const snap = await getDoc(doc(db, "financex", "appData"));
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.historial && Object.keys(d.historial).length >= Object.keys(historial).length) {
+          datosHistorial = d.historial;
+        }
+        if (d.mesesGuardados) datosMeses = d.mesesGuardados;
+      }
+    } catch (_) { /* usar datos locales */ }
+
     // Hoja 1: Resumen general
+    const totalIngr = Object.values(datosHistorial).reduce((a, dia) =>
+      a + METODOS.reduce((b, m) => b + dia.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0), 0);
+    const totalEgr = Object.values(datosHistorial).reduce((a, dia) =>
+      a + dia.gastos.reduce((s, g) => s + (+g.monto || 0), 0), 0);
     const resumen = [{
       "Período": "RESUMEN GENERAL",
-      "Total Días": Object.keys(historial).length,
-      "Total Meses": Object.keys(mesesGuardados).length,
-      "Saldo Total": saldoTotalGlobal,
+      "Total Días": Object.keys(datosHistorial).length,
+      "Total Meses": Object.keys(datosMeses).length,
+      "Total Ingresos": totalIngr,
+      "Total Egresos": totalEgr,
+      "Saldo General": totalIngr - totalEgr,
       "Generado": new Date().toLocaleString('es-CO'),
     }];
-    
-    // Hoja 2: Historial diario
-    const filasHistorial = Object.entries(historial)
-      .sort(([a], [b]) => b.localeCompare(a))
+
+    // Hoja 2: Historial diario resumido
+    const filasHistorial = Object.entries(datosHistorial)
+      .sort(([a], [b]) => a.localeCompare(b))
       .map(([fecha, dia]) => {
         const ingresos = METODOS.reduce((a, m) => a + dia.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
-        const egresos = METODOS.reduce((a, m) => a + dia.gastos.filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
+        const egresos = dia.gastos.reduce((s, g) => s + (+g.monto || 0), 0);
         return {
           "Fecha": fecha,
           "Ingresos": ingresos,
           "Egresos": egresos,
           "Saldo": ingresos - egresos,
-          "# Ventas": dia.ventas.length,
-          "# Gastos": dia.gastos.length,
+          "# Movimientos": (dia.ventas?.length || 0) + (dia.gastos?.length || 0),
         };
       });
-    
-    // Hoja 3: Detalle por método de pago
+
+    // Hoja 3: TODOS los movimientos con campos completos
+    const filasMovimientos = [];
+    Object.entries(datosHistorial)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([fecha, dia]) => {
+        dia.ventas?.forEach(v => {
+          METODOS.forEach(m => {
+            const monto = +v[m.key] || 0;
+            if (monto > 0) {
+              filasMovimientos.push({
+                "Fecha": fecha,
+                "Hora": v.hora || "-",
+                "Tipo": "Ingreso",
+                "Categoría": "Venta",
+                "Descripción": v.concepto || "-",
+                "Método": m.label,
+                "Monto": monto,
+              });
+            }
+          });
+        });
+        dia.gastos?.forEach(g => {
+          filasMovimientos.push({
+            "Fecha": fecha,
+            "Hora": g.hora || "-",
+            "Tipo": "Egreso",
+            "Categoría": g.categoria || "-",
+            "Descripción": g.concepto || "-",
+            "Método": METODOS.find(m => m.key === g.caja)?.label || g.caja || "-",
+            "Monto": g.monto || 0,
+          });
+        });
+      });
+
+    // Hoja 4: Detalle por método de pago
     const filasMetodos = [];
-    Object.entries(historial).forEach(([fecha, dia]) => {
+    Object.entries(datosHistorial).forEach(([fecha, dia]) => {
       METODOS.forEach(m => {
         const ventas = dia.ventas.reduce((a, v) => a + (+v[m.key] || 0), 0);
         const gastos = dia.gastos.filter(g => g.caja === m.key).reduce((a, g) => a + (+g.monto || 0), 0);
         if (ventas > 0 || gastos > 0) {
           filasMetodos.push({
-            "Fecha": fecha,
-            "Método": m.label,
-            "Ingresos": ventas,
-            "Egresos": gastos,
-            "Neto": ventas - gastos,
+            "Fecha": fecha, "Método": m.label,
+            "Ingresos": ventas, "Egresos": gastos, "Neto": ventas - gastos,
           });
         }
       });
     });
-    
-    // Hoja 4: Detalle de gastos
-    const filasGastos = [];
-    Object.entries(historial).forEach(([fecha, dia]) => {
-      dia.gastos?.forEach(g => {
-        filasGastos.push({
-          "Fecha": fecha,
-          "Hora": g.hora,
-          "Concepto": g.concepto,
-          "Método": METODOS.find(m => m.key === g.caja)?.label || g.caja,
-          "Monto": g.monto,
-          "Categoría": g.categoria,
-        });
-      });
-    });
-    
-    // Crear workbook con múltiples hojas
+
     const ws1 = XLSX.utils.json_to_sheet(resumen);
     const ws2 = XLSX.utils.json_to_sheet(filasHistorial);
-    const ws3 = XLSX.utils.json_to_sheet(filasMetodos);
-    const ws4 = XLSX.utils.json_to_sheet(filasGastos);
-    
-    // Ajustar ancho de columnas
-    ws1['!cols'] = [{wch: 20}, {wch: 12}, {wch: 12}, {wch: 15}, {wch: 25}];
-    ws2['!cols'] = [{wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10}, {wch: 10}];
-    ws3['!cols'] = [{wch: 12}, {wch: 15}, {wch: 12}, {wch: 12}, {wch: 12}];
-    ws4['!cols'] = [{wch: 12}, {wch: 8}, {wch: 25}, {wch: 15}, {wch: 12}, {wch: 15}];
-    
+    const ws3 = XLSX.utils.json_to_sheet(filasMovimientos);
+    const ws4 = XLSX.utils.json_to_sheet(filasMetodos);
+
+    ws1['!cols'] = [{wch:22},{wch:12},{wch:12},{wch:16},{wch:16},{wch:16},{wch:26}];
+    ws2['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:12},{wch:14}];
+    ws3['!cols'] = [{wch:12},{wch:8},{wch:10},{wch:18},{wch:28},{wch:16},{wch:14}];
+    ws4['!cols'] = [{wch:12},{wch:15},{wch:14},{wch:14},{wch:14}];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws1, "Resumen");
     XLSX.utils.book_append_sheet(wb, ws2, "Historial Diario");
-    XLSX.utils.book_append_sheet(wb, ws3, "Por Método");
-    XLSX.utils.book_append_sheet(wb, ws4, "Detalle Gastos");
-    
-    XLSX.writeFile(wb, `FinanceX-Backup-${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws3, "Movimientos Completo");
+    XLSX.utils.book_append_sheet(wb, ws4, "Por Método");
+
+    XLSX.writeFile(wb, `FinanceX-${new Date().toISOString().split('T')[0]}.xlsx`);
+    } finally {
+      setExportingBackup(false);
+    }
   };
 
   const habilitarSincroDatos = () => {
@@ -598,7 +630,6 @@ export default function FinanceX() {
 
             // Solo sobrescribir SI la nube tiene datos Y ES MÁS RECIENTE
             if (esValidoCloud && cloudModerno > localModerno) {
-              console.log("✓ Nube válida y más reciente, usando datos cloud");
               if (cloud.historial) setHistorial(cloud.historial);
               if (cloud.mesesGuardados) setMesesGuardados(cloud.mesesGuardados);
               if (cloud.conteo) setConteo({ ...conteoInicial(), ...cloud.conteo });
@@ -731,6 +762,32 @@ export default function FinanceX() {
   const delVenta = (id) => setHistorial(h => ({ ...h, [TODAY]: { ...diaHoy, ventas: diaHoy.ventas.filter(v => v.id !== id) } }));
   const delGasto = (id) => setHistorial(h => ({ ...h, [TODAY]: { ...diaHoy, gastos: diaHoy.gastos.filter(g => g.id !== id) } }));
 
+  const handleDelete = async (id) => {
+    let firestoreId = null;
+    for (const fecha of Object.keys(historial)) {
+      const dia = historial[fecha];
+      const v = dia.ventas?.find(v => v.id === id);
+      if (v) { firestoreId = v.firestoreId; break; }
+      const g = dia.gastos?.find(g => g.id === id);
+      if (g) { firestoreId = g.firestoreId; break; }
+    }
+    setHistorial(h => {
+      const next = { ...h };
+      for (const fecha of Object.keys(next)) {
+        const dia = next[fecha];
+        if (dia.ventas?.some(v => v.id === id))
+          return { ...next, [fecha]: { ...dia, ventas: dia.ventas.filter(v => v.id !== id) } };
+        if (dia.gastos?.some(g => g.id === id))
+          return { ...next, [fecha]: { ...dia, gastos: dia.gastos.filter(g => g.id !== id) } };
+      }
+      return next;
+    });
+    if (firestoreId) {
+      try { await deleteDoc(doc(db, "movimientos", firestoreId)); }
+      catch (e) { console.error("Error en la operación de FinanceX:", e); }
+    }
+  };
+
   // ── Caja menor ────────────────────────────────────────────────────────────
   const totalMenor = useMemo(() =>
     [...BILLETES, ...MONEDAS].reduce((a, d) => a + d * (conteo[d] || 0), 0) + (+conteo.extra || 0),
@@ -752,25 +809,25 @@ export default function FinanceX() {
   ];
 
   // ── Estado gastos diarios (filas dinámicas) ───────────────────────────────
-  const EMPTY_ROW = () => ({ id: uid(), caja: "efectivo", concepto: "", monto: "" });
+  const EMPTY_ROW = () => ({ id: uid(), caja: "efectivo", concepto: "", monto: "", categoria: "Otros" });
   const [fechaGastos, setFechaGastos] = useState(todayStr());
   const [filasGastos, setFilasGastos] = useState([EMPTY_ROW(), EMPTY_ROW(), EMPTY_ROW()]);
 
   // ══════════════════════════════════════════════════════════════════════════
 const S = { // styles
-    card:    "bg-gray-800 border border-gray-700 rounded-2xl shadow-lg",
+    card:    "bg-[#111116] border border-gray-800/30 rounded-2xl shadow-lg",
     section: "text-xs text-gray-500 uppercase tracking-widest font-semibold mb-2",
-    row:     "flex items-center justify-between py-2.5 border-b border-gray-800 last:border-0",
+    row:     "flex items-center justify-between py-2.5 border-b border-gray-800/40 last:border-0",
     btn:     {
-      primary: "bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-      success: "bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-      danger:  "bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-      ghost:   "bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+      primary: "bg-gradient-to-r from-blue-900/90 to-violet-900/90 hover:from-blue-800/90 hover:to-violet-800/90 border border-blue-700/30 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+      success: "bg-emerald-800/80 hover:bg-emerald-700/80 border border-emerald-700/30 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+      danger:  "bg-red-800/80 hover:bg-red-700/80 border border-red-700/30 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+      ghost:   "bg-white/[0.05] hover:bg-white/[0.08] border border-gray-700/40 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
     },
     table: {
-      header: "bg-gray-800/80 border-b border-gray-700",
-      cell:   "border border-gray-700 px-3 py-2 text-xs",
-      row:    "border-b border-gray-700 hover:bg-gray-800/50 transition-colors",
+      header: "bg-[#111116] border-b border-gray-800/40",
+      cell:   "border border-gray-800/40 px-3 py-2.5 text-xs",
+      row:    "border-b border-gray-800/30 hover:bg-white/[0.025] transition-colors",
     }
   };
 
@@ -1092,11 +1149,31 @@ const S = { // styles
     };
 
     const exportarExcel = (dias, nombreArchivo) => {
-      const rows = toRows(dias);
-      if (!rows.length) return;
-      const ws = XLSX.utils.json_to_sheet(rows);
+      // Hoja 1: resumen por día
+      const rowsResumen = toRows(dias);
+      // Hoja 2: movimientos detallados con Fecha, Tipo, Categoría, Descripción, Método, Monto
+      const rowsDetalle = [];
+      Object.entries(dias)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .forEach(([fecha, dia]) => {
+          dia.ventas?.forEach(v => {
+            METODOS.forEach(m => {
+              const monto = +v[m.key] || 0;
+              if (monto > 0) rowsDetalle.push({ Fecha: fecha, Hora: v.hora || "-", Tipo: "Ingreso", Categoría: "Venta", Descripción: v.concepto || "-", Método: m.label, Monto: monto });
+            });
+          });
+          dia.gastos?.forEach(g => {
+            rowsDetalle.push({ Fecha: fecha, Hora: g.hora || "-", Tipo: "Egreso", Categoría: g.categoria || "-", Descripción: g.concepto || "-", Método: METODOS.find(m => m.key === g.caja)?.label || g.caja || "-", Monto: g.monto || 0 });
+          });
+        });
+      if (!rowsDetalle.length && !rowsResumen.length) return;
+      const ws1 = XLSX.utils.json_to_sheet(rowsResumen);
+      const ws2 = XLSX.utils.json_to_sheet(rowsDetalle);
+      ws1['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:12},{wch:14}];
+      ws2['!cols'] = [{wch:12},{wch:8},{wch:10},{wch:18},{wch:28},{wch:16},{wch:14}];
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Historial");
+      XLSX.utils.book_append_sheet(wb, ws1, "Historial");
+      XLSX.utils.book_append_sheet(wb, ws2, "Movimientos Detalle");
       XLSX.writeFile(wb, `${nombreArchivo}.xlsx`);
     };
 
@@ -1287,7 +1364,8 @@ const S = { // styles
               type="month"
               value={mesExport}
               onChange={e => setMesExport(e.target.value)}
-              className="bg-gray-700 border border-gray-600 rounded-lg text-gray-200 text-xs px-3 py-2 focus:outline-none focus:border-blue-500"
+              className="bg-[#111116] border border-gray-800/50 rounded-lg text-gray-300 text-xs px-2 py-1.5 focus:outline-none focus:border-blue-600/60 w-auto shrink-0"
+              style={{minWidth:0, maxWidth:136}}
             />
             <button
               onClick={exportarMes}
@@ -1580,7 +1658,7 @@ const S = { // styles
     // Guardado automático temporal para ingresos y egresos
     const TEMP_FORM_KEY = "financex_temp_form_v1";
     // Cada fila arranca con un método diferente (ciclando por METODOS)
-    const EROW = (i=0) => ({ id: uid(), caja: METODOS[i % METODOS.length].key, concepto: "", monto: "" });
+    const EROW = (i=0) => ({ id: uid(), caja: METODOS[i % METODOS.length].key, concepto: "", monto: "", categoria: "Otros" });
     const INIT_ROWS = (n=8) => Array.from({length:n}, (_,i) => EROW(i));
     // Egresos
     const [rowsG, setRowsG] = useState(INIT_ROWS());
@@ -1655,6 +1733,7 @@ const S = { // styles
 
     // Guardado manual de ingresos/egresos
     const [savedTempMsg, setSavedTempMsg] = useState(false);
+    const [savedMsg, setSavedMsg] = useState(false);
     const guardarTemporal = () => {
       const temp = {
         rowsI,
@@ -1676,18 +1755,25 @@ const S = { // styles
     const updG = (id,k,v) => setRowsG(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addG = () => setRowsG(r=>[...r, EROW(r.length)]);
     const delG = (id) => setRowsG(r=>r.filter(x=>x.id!==id));
-    const totalG = rowsG.reduce((a,r)=>a+(+r.monto||0),0);
-    const hayG   = rowsG.some(r=>r.concepto.trim()&&+r.monto>0);
+    const totalG = useMemo(()=>rowsG.reduce((a,r)=>a+(+r.monto||0),0),[rowsG]);
+    const hayG   = useMemo(()=>rowsG.some(r=>r.concepto.trim()&&+r.monto>0),[rowsG]);
 
     // ...existing code...
     const updI = (id,k,v) => setRowsI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addI = () => setRowsI(r=>[...r, EROW(r.length)]);
     const delI = (id) => setRowsI(r=>r.filter(x=>x.id!==id));
-    const totalI = rowsI.reduce((a,r)=>a+(+r.monto||0),0);
-    const hayI   = rowsI.some(r=>+r.monto>0);
+    const totalI = useMemo(()=>rowsI.reduce((a,r)=>a+(+r.monto||0),0),[rowsI]);
+    const hayI   = useMemo(()=>rowsI.some(r=>+r.monto>0),[rowsI]);
 
     const totGRow = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,rowsG.filter(r=>r.caja===m.key&&+r.monto>0).reduce((a,r)=>a+(+r.monto),0)])),[rowsG]);
     const totIRow = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,rowsI.filter(r=>r.caja===m.key&&+r.monto>0).reduce((a,r)=>a+(+r.monto),0)])),[rowsI]);
+    const conceptosEgreso = useMemo(() => {
+      const set = new Set();
+      Object.values(historial).forEach(dia => {
+        dia.gastos?.forEach(g => { if (g.concepto?.trim()) set.add(g.concepto.trim()); });
+      });
+      return [...set].filter(Boolean).sort();
+    }, [historial]);
 
     // Calculadora local billetes/monedas (debajo de ventas por día)
     const DENOMS = [50,100,200,500,1000,2000,5000,10000,20000,50000,100000];
@@ -1703,7 +1789,7 @@ const S = { // styles
     const updGI = (id,k,v) => setRowsGI(r=>r.map(x=>x.id===id?{...x,[k]:v}:x));
     const addGI = () => setRowsGI(r=>[...r, GI_ROW()]);
     const limpiarGI = () => setRowsGI(initGastosInternos());
-    const totalGI = rowsGI.reduce((a,r)=>a+(+r.monto||0),0);
+    const totalGI = useMemo(()=>rowsGI.reduce((a,r)=>a+(+r.monto||0),0),[rowsGI]);
 
     useEffect(() => {
       setConteoLocal(prev => ({
@@ -1713,27 +1799,65 @@ const S = { // styles
       }));
     }, [conteo]);
 
-    const registrarTodo = () => {
+    const registrarTodo = async () => {
       const validasI = rowsI.filter(r => +r.monto > 0);
       const validasG = rowsG.filter(r => r.concepto.trim() && +r.monto > 0);
       if (!validasI.length && !validasG.length) return;
       const fecha = fechaI || fechaG || TODAY;
+
+      // Guardar ingreso en Firebase
+      let ventaFirestoreId = null;
+      const ventaTotal = validasI.reduce((a, r) => a + Number(r.monto), 0);
+      if (validasI.length > 0) {
+        try {
+          const ref = await addDoc(collection(db, "movimientos"), {
+            tipo: "ingreso", monto: Number(ventaTotal), categoria: "Ventas",
+            descripcion: "Ventas del día", fecha: serverTimestamp(), owner: "Johan",
+          });
+          ventaFirestoreId = ref.id;
+        } catch (e) { console.error("Error en la operación de FinanceX:", e); }
+      }
+
+      // Guardar egresos en Firebase y obtener IDs
+      const gastosConIds = await Promise.all(
+        validasG.map(async r => {
+          let firestoreId = null;
+          try {
+            const ref = await addDoc(collection(db, "movimientos"), {
+              tipo: "egreso", monto: Number(r.monto),
+              categoria: r.categoria || "Otros",
+              descripcion: r.concepto.trim(),
+              fecha: serverTimestamp(), owner: "Johan",
+            });
+            firestoreId = ref.id;
+          } catch (e) { console.error("Error en la operación de FinanceX:", e); }
+          return {
+            id: uid(), hora: nowStr(), fecha,
+            concepto: r.concepto.trim(), descripcion: r.concepto.trim(),
+            monto: Number(r.monto), caja: r.caja,
+            categoria: r.categoria || "Otros", firestoreId,
+          };
+        })
+      );
+
       setHistorial(h => {
         const dia = h[fecha] || { ventas: [], gastos: [] };
         const nuevasVentas = validasI.length > 0 ? [...dia.ventas, {
           id: uid(), hora: nowStr(), fecha,
-          concepto: "Ventas del día",
-          ...Object.fromEntries(METODOS.map(m => [m.key, validasI.filter(r=>r.caja===m.key).reduce((a,r)=>a+(+r.monto),0)])),
-          total: validasI.reduce((a,r) => a+(+r.monto), 0)
+          concepto: "Ventas del día", descripcion: "Ventas del día",
+          ...Object.fromEntries(METODOS.map(m => [m.key, validasI.filter(r => r.caja === m.key).reduce((a, r) => a + Number(r.monto), 0)])),
+          total: ventaTotal, firestoreId: ventaFirestoreId,
         }] : dia.ventas;
         const nuevosGastos = validasG.length > 0
-          ? [...dia.gastos, ...validasG.map(r => ({ id:uid(), hora:nowStr(), fecha, concepto:r.concepto.trim(), monto:+r.monto, caja:r.caja, categoria:"gasto diario" }))]
+          ? [...dia.gastos, ...gastosConIds]
           : dia.gastos;
         return { ...h, [fecha]: { ventas: nuevasVentas, gastos: nuevosGastos } };
       });
       setRowsI(INIT_ROWS());
       setRowsG(INIT_ROWS());
       limpiarTempForm();
+      setSavedMsg(true);
+      setTimeout(() => setSavedMsg(false), 1200);
     };
 
     // Tabla derecha: fila ingreso muestra día (ej: "Miércoles"), fila egreso muestra fecha (ej: "11/03")
@@ -1837,11 +1961,58 @@ const S = { // styles
     const th = "border border-gray-700 text-center py-1 px-1 font-semibold";
     const td = "border border-gray-700/50 text-center font-mono py-1 px-0.5 text-xs";
 
+    // Movimientos recientes de la fecha activa
+    const movimientosActivos = useMemo(() => {
+      const dia = historial[fechaI] || { ventas: [], gastos: [] };
+      return [
+        ...dia.ventas.map(v => ({ ...v, _tipo: "venta" })),
+        ...dia.gastos.map(g => ({ ...g, _tipo: "gasto" })),
+      ].sort((a, b) => (b.hora || "00:00:00").localeCompare(a.hora || "00:00:00")).slice(0, 25);
+    }, [historial, fechaI]);
+
+    const balanceFecha = useMemo(() => {
+      const dia = historial[fechaI] || { ventas: [], gastos: [] };
+      const ingr = dia.ventas.reduce((a, v) => a + Number(v.total || 0), 0);
+      const egr  = dia.gastos.reduce((a, g) => a + Number(g.monto || 0), 0);
+      return { ingr, egr, neto: ingr - egr };
+    }, [historial, fechaI]);
+
     return (
       <div className="space-y-3">
+        <style>{`.fodexa-scroll::-webkit-scrollbar{width:3px}.fodexa-scroll::-webkit-scrollbar-track{background:transparent}.fodexa-scroll::-webkit-scrollbar-thumb{background:#25252E;border-radius:4px}.fodexa-scroll::-webkit-scrollbar-thumb:hover{background:#374151}`}</style>
+
+        {/* ── TARJETAS BALANCE FODEXA ── */}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label:"Ingresos del día", val:balanceFecha.ingr, icon:ICONS.up,    color:"#10b981", bg:"#061a0f", border:"#10b98130" },
+            { label:"Egresos del día",  val:balanceFecha.egr,  icon:ICONS.down,  color:"#f87171", bg:"#1a0606", border:"#f8717130" },
+            { label:"Neto del día",     val:balanceFecha.neto, icon:ICONS.check,
+              color: balanceFecha.neto >= 0 ? "#60a5fa" : "#f87171",
+              bg:    balanceFecha.neto >= 0 ? "#060f1a" : "#1a0606",
+              border:balanceFecha.neto >= 0 ? "#60a5fa30" : "#f8717130",
+              gradient: balanceFecha.neto >= 0 },
+          ].map(c => (
+            <div key={c.label}
+              className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5 transition-all duration-300 ease-in-out hover:brightness-110 hover:scale-[1.02]"
+              style={{background:c.bg, border:`1px solid ${c.border}`, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", boxShadow:`0 0 28px ${c.border}55, inset 0 1px 0 rgba(255,255,255,0.04)`}}>  
+              <div className="rounded-xl p-1.5 shrink-0" style={{background:c.color+"18"}}>
+                <Ic d={c.icon} s={14} c={c.color}/>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="uppercase tracking-widest text-gray-500" style={{fontSize:"8px"}}>{c.label}</div>
+                <div className="font-mono font-bold truncate"
+                  style={c.gradient
+                    ? {fontSize:"13px", background:"linear-gradient(135deg,#60a5fa,#818cf8)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"}
+                    : {color:c.color, fontSize:"13px"}}>
+                  {$(c.val)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
 
         {/* Fecha única compartida */}
-        <div className="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2">
+        <div className="flex items-center gap-3 rounded-xl px-3 py-2" style={{background:"#16161D", border:"1px solid rgba(55,65,81,0.35)"}}>
           <span className="text-xs text-gray-500 uppercase tracking-wider font-medium">Fecha</span>
           <input type="date" value={fechaI} onChange={e=>{ setFechaI(e.target.value); setFechaG(e.target.value); }}
             className="bg-transparent text-white text-sm font-semibold focus:outline-none flex-1" />
@@ -1859,11 +2030,14 @@ const S = { // styles
           </button>
         </div>
 
-        {/* Layout: [ingresos | egresos] | ventas */}
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        {/* Layout: [registro 30%] | [movimientos 70%] */}
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:grid-cols-[430px_1fr] lg:overflow-visible lg:gap-3">
 
           {/* Columna izquierda: ambas tablas + botón registrar */}
-          <div className="shrink-0 flex flex-col gap-2" style={{width:360}}>
+          <div className="shrink-0 flex flex-col gap-2 rounded-2xl p-2" style={{width:426, background:"#0d0d10", border:"1px solid rgba(255,255,255,0.04)", boxShadow:"inset 0 1px 0 rgba(255,255,255,0.03)"}}>
+            <datalist id="datalist-conceptos-egreso">
+              {conceptosEgreso.map(c => <option key={c} value={c}/>)}
+            </datalist>
             <div className="flex gap-2">
               {[
                 {
@@ -1880,7 +2054,7 @@ const S = { // styles
                   total:totalG, totRow:totGRow,
                   totalLabel:"??  TOTAL EGRESOS", totalColor:"text-red-400",
                   rowBgEven:"#1a0d0d", rowBgOdd:"#120a0a",
-                  montoColor:"#fca5a5", sinConcepto: false,
+                  montoColor:"#fca5a5", sinConcepto: false, tieneCategoria: true,
                 }
               ].map(cfg => (
                 <div key={cfg.label} className="flex-1 min-w-0">
@@ -1900,8 +2074,8 @@ const S = { // styles
                     <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
                       <colgroup>
                         {cfg.sinConcepto
-                          ? <><col style={{width:"55%"}}/><col style={{width:"45%"}}/></>
-                          : <><col style={{width:"38%"}}/><col style={{width:"22%"}}/><col style={{width:"40%"}}/></>
+                          ? <><col style={{width:"58%"}}/><col style={{width:"42%"}}/></>
+                          : <><col style={{width:"30%"}}/><col style={{width:"40%"}}/><col style={{width:"30%"}}/></>
                         }
                       </colgroup>
                       <thead>
@@ -1925,9 +2099,19 @@ const S = { // styles
                               </td>
                               {!cfg.sinConcepto && (
                                 <td className="border-r border-gray-700/40 px-0.5 py-0.5">
-                                  <input className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
+                                  <input list="datalist-conceptos-egreso"
+                                    className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
                                     style={{fontSize:"10px"}} placeholder="concepto…"
                                     value={r.concepto} onChange={e=>cfg.upd(r.id,"concepto",e.target.value)}/>
+                                  {cfg.tieneCategoria && (
+                                    <select
+                                      className="w-full bg-transparent text-gray-500 focus:outline-none cursor-pointer appearance-none"
+                                      style={{fontSize:"9px",marginTop:1}}
+                                      value={r.categoria || "Otros"}
+                                      onChange={e=>cfg.upd(r.id,"categoria",e.target.value)}>
+                                      {CATEGORIAS_EGRESO.map(c=><option key={c} value={c} style={{background:"#1f2937",color:"#d1d5db"}}>{c}</option>)}
+                                    </select>
+                                  )}
                                 </td>
                               )}
                               <td className="px-0.5 py-0.5 relative">
@@ -1984,10 +2168,15 @@ const S = { // styles
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 bg-yellow-700 hover:bg-yellow-600 text-white">
                 <Ic d={ICONS.check} s={15} c="#fff"/> Guardar temporal
               </button>
-              <button onClick={registrarTodo} disabled={!hayI && !hayG}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2
-                  ${(hayI||hayG) ? "bg-blue-700 hover:bg-blue-600 text-white" : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}`}>
-                <Ic d={ICONS.check} s={15} c={(hayI||hayG)?"#fff":"#4b5563"}/> Registrar
+              <button onClick={registrarTodo} disabled={(!hayI && !hayG) || savedMsg}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ease-in-out flex items-center justify-center gap-2
+                  ${savedMsg
+                    ? "bg-emerald-700 text-white scale-[0.98] shadow-lg shadow-emerald-900/50"
+                    : (hayI||hayG)
+                      ? "bg-gradient-to-r from-blue-900 to-violet-900 hover:from-blue-800 hover:to-violet-800 border border-blue-700/40 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-violet-900/40 active:translate-y-0 text-white"
+                      : "bg-[#16161D] text-gray-600 cursor-not-allowed border border-gray-800/50"}`}>
+                <Ic d={ICONS.check} s={15} c={(savedMsg||hayI||hayG)?"#fff":"#4b5563"}/>
+                {savedMsg ? "¡Guardado!" : "Registrar"}
               </button>
             </div>
             {savedTempMsg && (
@@ -2093,7 +2282,7 @@ const S = { // styles
           <div className="flex-1 min-w-0" style={{minWidth:320}}>
 
             {/* Header */}
-            <div className="rounded-t-xl border border-gray-700 border-b-0 px-2 py-1.5 bg-gray-800 flex items-center justify-between gap-2">
+            <div className="rounded-t-xl border border-gray-800/60 border-b-0 px-2 py-1.5 flex items-center justify-between gap-2" style={{background:"#16161D"}}>
               <span className="text-xs font-bold text-gray-300 uppercase tracking-wider shrink-0">Ventas del Mes</span>
               <input type="month" value={mesFiltro} onChange={e=>setMesFiltro(e.target.value)}
                 className="bg-transparent text-gray-400 focus:outline-none text-right"
@@ -2349,6 +2538,83 @@ const S = { // styles
 
           </div>
         </div>
+
+        {/* ── MOVIMIENTOS RECIENTES ── */}
+        <div className="mt-1">
+          <div className="rounded-t-xl border border-gray-800/60 border-b-0 px-3 py-2 flex items-center justify-between" style={{background:"#16161D"}}>
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Movimientos Recientes</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono" style={{color:"#6ee7b7"}}>↑ {$(balanceFecha.ingr)}</span>
+              <span className="text-xs font-mono text-red-400">↓ {$(balanceFecha.egr)}</span>
+              <span className={`text-xs font-mono font-bold ${balanceFecha.neto >= 0 ? "text-blue-400" : "text-red-400"}`}>
+                = {$(balanceFecha.neto)}
+              </span>
+            </div>
+          </div>
+          <div className="border border-gray-800/60 rounded-b-xl overflow-hidden">
+            <div className="overflow-y-auto max-h-[600px] fodexa-scroll" style={{scrollbarWidth:"thin",scrollbarColor:"#25252E transparent"}}>
+            <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
+              <colgroup>
+                <col style={{width:46}}/><col style={{width:62}}/><col/><col style={{width:110}}/><col style={{width:76}}/><col style={{width:36,minWidth:36,maxWidth:36}}/>
+              </colgroup>
+              <thead>
+                <tr className="sticky top-0 z-10 border-b border-gray-800/70" style={{background:"#1a1a21"}}>
+                  {["Hora","Tipo","Descripción","Categoría","Monto",""].map(h=>(
+                    <th key={h} className="px-2 py-1.5 text-left text-gray-500 font-semibold uppercase tracking-wider border-r border-gray-800/40 last:border-r-0" style={{fontSize:"9px"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movimientosActivos.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-14 text-center">
+                      <div className="flex flex-col items-center gap-3 opacity-40 select-none">
+                        <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="4" width="18" height="16" rx="2"/>
+                          <path d="M3 9h18M8 4v5M16 4v5"/>
+                        </svg>
+                        <span className="text-gray-500 text-xs font-medium tracking-widest uppercase">No hay movimientos registrados hoy</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : movimientosActivos.map(mov => {
+                  const isIngreso = mov._tipo === "venta";
+                  return (
+                    <tr key={mov.id}
+                      className="border-b border-gray-800/15 last:border-b-0 hover:bg-white/[0.025] transition-all duration-300 ease-in-out group"
+                      style={{background: isIngreso ? "#0a1a0a" : "#1a0a0a"}}>
+                      <td className="px-2 py-1.5 text-gray-500 font-mono border-r border-gray-800/40" style={{fontSize:"10px"}}>{mov.hora}</td>
+                      <td className="px-2 py-1.5 border-r border-gray-800/40">
+                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${isIngreso ? "text-emerald-400 bg-emerald-900/30" : "text-red-400 bg-red-900/30"}`}
+                          style={{fontSize:"9px"}}>
+                          {isIngreso ? "↑ Ingreso" : "↓ Egreso"}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 text-sm text-gray-300 truncate border-r border-gray-800/40">{mov.concepto || mov.descripcion || "—"}</td>
+                      <td className="px-2 py-1.5 border-r border-gray-800/40">
+                        <span className="bg-[#0f1629] border border-blue-800/50 px-2 py-0.5 rounded-full font-medium text-blue-200 uppercase tracking-wide" style={{fontSize:"9px"}}>
+                          {mov.categoria || (isIngreso ? "Ventas" : "—")}
+                        </span>
+                      </td>
+                      <td className={`px-2 py-1.5 text-right font-mono font-bold border-r border-gray-800/40 ${isIngreso ? "text-emerald-400" : "text-red-400"}`} style={{fontSize:"11px"}}>
+                        {isIngreso ? `+${$(Number(mov.total || 0))}` : `−${$(Number(mov.monto || 0))}`}
+                      </td>
+                      <td className="px-1 py-1.5 text-center overflow-hidden" style={{width:40,minWidth:40,maxWidth:40}}>
+                        <button
+                          onClick={() => handleDelete(mov.id)}
+                          className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all"
+                          title="Eliminar movimiento">
+                          <Ic d={ICONS.trash} s={12}/>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -2366,10 +2632,10 @@ const S = { // styles
     metricas: ICONS.check,
   };
   return (
-    <div className="min-h-screen bg-gray-950 text-white" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
+    <div className="h-screen w-screen bg-[#08080A] text-white flex flex-col overflow-hidden" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
 
       {/* HEADER */}
-      <header className="sticky top-0 z-30 bg-gray-950/95 border-b border-gray-800 px-4 py-3 flex items-center justify-between" style={{ backdropFilter: "blur(10px)" }}>
+      <header className="shrink-0 z-30 border-b border-gray-800/30 px-4 py-3 flex items-center justify-between" style={{ backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", background: "rgba(8,8,10,0.97)" }}>
         <div className="flex items-center gap-2">
           <img src="/Financex.png" alt="FinanceX" className="w-7 h-7 rounded-lg object-cover border border-gray-700" />
           <span className="text-sm font-bold text-white">FinanceX</span>
@@ -2394,10 +2660,11 @@ const S = { // styles
           </button>
           <button
             onClick={descargarBackup}
-            className="text-xs text-blue-400 hover:text-blue-300 border border-blue-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+            disabled={exportingBackup}
+            className={`text-xs border px-2.5 py-1.5 rounded-lg transition-colors ${exportingBackup ? "border-gray-700/40 text-gray-500 cursor-not-allowed" : "text-blue-400 hover:text-blue-300 border-blue-800/60"}`}
             title="Descargar respaldo EXCEL"
           >
-            💾 Excel
+            {exportingBackup ? "⏳ Preparando..." : "💾 Excel"}
           </button>
           <button
             onClick={reiniciarTodo}
@@ -2470,52 +2737,51 @@ const S = { // styles
             </button>
             <button
               onClick={descargarBackup}
-              className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded-lg transition-colors shrink-0"
+              disabled={exportingBackup}
+              className={`text-xs px-3 py-1 rounded-lg transition-colors shrink-0 ${exportingBackup ? "bg-gray-700 text-gray-500 cursor-not-allowed" : "bg-blue-700 hover:bg-blue-600 text-white"}`}
               title="Descargar en Excel"
             >
-              💾 Excel
+              {exportingBackup ? "⏳..." : "💾 Excel"}
             </button>
           </div>
         </div>
       )}
 
-      <div className="px-2 py-3 mx-auto w-full max-w-7xl">
-        <div className="flex gap-3 items-start">
-          {/* TABS LATERAL COLAPSABLE */}
-          <aside className={`${sidebarCollapsed ? 'w-16' : 'w-36'} shrink-0 sticky top-[64px] transition-all`}>
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden flex flex-col shadow-lg">
-              <button
-                onClick={() => setSidebarCollapsed(c => !c)}
-                className="w-full flex items-center justify-center py-2 border-b border-gray-800 text-gray-400 hover:text-white transition-colors bg-gray-950"
-                style={{ fontSize: '18px' }}
-              >
-                <Ic d={sidebarCollapsed ? ICONS.right : ICONS.left} s={20} />
-              </button>
-              {TABS.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-start'} px-2 py-3 text-sm font-semibold transition-all border-l-4 ${
-                    tab === t.id
-                      ? "border-blue-500 bg-blue-950/60 text-white shadow-md"
-                      : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/70"
-                  }`}
-                  style={{ minHeight: '48px', letterSpacing: '0.5px', borderRadius: sidebarCollapsed ? '50%' : '0' }}
-                >
-                  <Ic d={TAB_ICONS[t.id]} s={22} c={tab === t.id ? '#3b82f6' : '#6b7280'} />
-                  {!sidebarCollapsed && <span className="ml-3 font-medium">{t.label}</span>}
-                </button>
-              ))}
-            </div>
-          </aside>
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        {/* TABS LATERAL COLAPSABLE */}
+        <aside className={`${sidebarCollapsed ? 'w-16' : 'w-36'} shrink-0 flex flex-col transition-all duration-300 border-r border-gray-800/30`} style={{background:"#0d0d10"}}>
+          <button
+            onClick={() => setSidebarCollapsed(c => !c)}
+            className="w-full flex items-center justify-center py-3 border-b border-gray-800/40 text-gray-500 hover:text-white transition-colors"
+            style={{ fontSize: '18px' }}
+          >
+            <Ic d={sidebarCollapsed ? ICONS.right : ICONS.left} s={18} />
+          </button>
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-start'} px-3 py-3.5 text-sm font-semibold transition-all border-l-2 ${
+                tab === t.id
+                  ? "border-blue-500/80 text-white" 
+                  : "border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/[0.03]"
+              }`}
+              style={{ letterSpacing: '0.5px', background: tab === t.id ? 'rgba(59,130,246,0.07)' : undefined }}
+            >
+              <Ic d={TAB_ICONS[t.id]} s={20} c={tab === t.id ? '#3b82f6' : '#6b7280'} />
+              {!sidebarCollapsed && <span className="ml-3 font-medium text-sm">{t.label}</span>}
+            </button>
+          ))}
+        </aside>
 
-          {/* CONTENT */}
-          <main className="flex-1 min-w-0 pb-8">
+        {/* CONTENT */}
+        <main className="flex-1 min-w-0 overflow-y-auto" style={{background:"#08080A"}}>
+          <div className="px-3 py-3 pb-8">
             {tab === "cajaDiaria" && <ViewCajaDiaria />}
             {tab === "historial"  && <ViewHistorial />}
             {tab === "metricas"   && <ViewMetricas historial={historial} />}
-          </main>
-        </div>
+          </div>
+        </main>
       </div>
 
       {/* ═══ SHEET UNIFICADO ══════════════════════════════════════════════ */}
@@ -2562,10 +2828,11 @@ const S = { // styles
                 </div>
                 {METODOS.map(m => (
                   <div key={m.key} className="border-r border-gray-700 last:border-r-0" style={{ background: m.bg + "55" }}>
-                    <input type="number" inputMode="numeric"
+                    <input type="number" inputMode="numeric" min="0"
                       className="w-full bg-transparent text-emerald-300 text-xs font-mono text-center py-2.5 px-0.5 focus:outline-none placeholder-gray-700 focus:bg-emerald-900/20"
                       placeholder="0" value={fVenta[m.key] || ""}
-                      onChange={e => setFVenta(p => ({ ...p, [m.key]: e.target.value }))} />
+                      onKeyDown={e=>e.key==="-"&&e.preventDefault()}
+                      onChange={e => setFVenta(p => ({ ...p, [m.key]: Math.max(0,+e.target.value||0)||"" }))} />
                   </div>
                 ))}
               </div>
@@ -2577,10 +2844,11 @@ const S = { // styles
                 </div>
                 {METODOS.map(m => (
                   <div key={m.key} className="border-r border-gray-700 last:border-r-0" style={{ background: m.bg + "33" }}>
-                    <input type="number" inputMode="numeric"
+                    <input type="number" inputMode="numeric" min="0"
                       className="w-full bg-transparent text-red-300 text-xs font-mono text-center py-2.5 px-0.5 focus:outline-none placeholder-gray-700 focus:bg-red-900/20"
                       placeholder="0" value={fGasto[`monto_${m.key}`] || ""}
-                      onChange={e => setFGasto(p => ({ ...p, [`monto_${m.key}`]: e.target.value }))} />
+                      onKeyDown={e=>e.key==="-"&&e.preventDefault()}
+                      onChange={e => setFGasto(p => ({ ...p, [`monto_${m.key}`]: Math.max(0,+e.target.value||0)||"" }))} />
                   </div>
                 ))}
               </div>
@@ -2597,8 +2865,8 @@ const S = { // styles
                 <div>
                   <Lbl>Categoría</Lbl>
                   <select className={inp} value={fGasto.categoria} onChange={e => setFGasto(p => ({ ...p, categoria: e.target.value }))}>
-                    {["domicilio","turno","insumo","servicio","nómina","arriendo","publicidad","otro"].map(c => (
-                      <option key={c} value={c}>{c}</option>
+                    {CATEGORIAS_EGRESO.map(c => (
+                      <option key={c} value={c} style={{background:"#1f2937",color:"#d1d5db"}}>{c}</option>
                     ))}
                   </select>
                 </div>
@@ -2620,24 +2888,58 @@ const S = { // styles
               ))}
             </div>
 
-            <button onClick={() => {
+            <button onClick={async () => {
               const totalIngreso = METODOS.reduce((a, m) => a + (+fVenta[m.key] || 0), 0);
               const totalEgreso  = METODOS.reduce((a, m) => a + (+fGasto[`monto_${m.key}`] || 0), 0);
               if (!totalIngreso && !totalEgreso) return;
               const fecha = fVenta.fecha || TODAY;
+
+              // Guardar ingreso en Firebase
+              let ventaFSId = null;
+              if (totalIngreso > 0) {
+                try {
+                  const ref = await addDoc(collection(db, "movimientos"), {
+                    tipo: "ingreso", monto: Number(totalIngreso),
+                    categoria: "Ventas", descripcion: fVenta.concepto || "Ventas del día",
+                    fecha: serverTimestamp(), owner: "Johan",
+                  });
+                  ventaFSId = ref.id;
+                } catch (e) { console.error("Error en la operación de FinanceX:", e); }
+              }
+
+              // Guardar egresos en Firebase
+              const egresosFS = await Promise.all(
+                METODOS.filter(m => +fGasto[`monto_${m.key}`] > 0).map(async m => {
+                  let firestoreId = null;
+                  try {
+                    const ref = await addDoc(collection(db, "movimientos"), {
+                      tipo: "egreso", monto: Number(fGasto[`monto_${m.key}`]),
+                      categoria: fGasto.categoria || "Otros",
+                      descripcion: fGasto.concepto || "Egreso",
+                      fecha: serverTimestamp(), owner: "Johan",
+                    });
+                    firestoreId = ref.id;
+                  } catch (e) { console.error("Error en la operación de FinanceX:", e); }
+                  return { id: uid(), hora: nowStr(), fecha,
+                    concepto: fGasto.concepto || "Egreso", descripcion: fGasto.concepto || "Egreso",
+                    monto: Number(fGasto[`monto_${m.key}`]), caja: m.key,
+                    categoria: fGasto.categoria || "Otros", firestoreId };
+                })
+              );
+
               setHistorial(h => {
                 const dia = h[fecha] || { ventas: [], gastos: [] };
                 const nuevasVentas = totalIngreso > 0
-                  ? [...dia.ventas, { id: uid(), hora: nowStr(), fecha, concepto: fVenta.concepto || "Ventas del día", ...Object.fromEntries(METODOS.map(m => [m.key, +fVenta[m.key] || 0])), total: totalIngreso }]
+                  ? [...dia.ventas, { id: uid(), hora: nowStr(), fecha, concepto: fVenta.concepto || "Ventas del día",
+                      descripcion: fVenta.concepto || "Ventas del día",
+                      ...Object.fromEntries(METODOS.map(m => [m.key, Number(fVenta[m.key] || 0)])),
+                      total: Number(totalIngreso), firestoreId: ventaFSId }]
                   : dia.ventas;
-                const nuevosGastos = METODOS.filter(m => +fGasto[`monto_${m.key}`] > 0).reduce((arr, m) => [
-                  ...arr,
-                  { id: uid(), hora: nowStr(), fecha, concepto: fGasto.concepto || "Egreso", monto: +fGasto[`monto_${m.key}`], caja: m.key, categoria: fGasto.categoria }
-                ], dia.gastos);
+                const nuevosGastos = egresosFS.length > 0 ? [...dia.gastos, ...egresosFS] : dia.gastos;
                 return { ...h, [fecha]: { ventas: nuevasVentas, gastos: nuevosGastos } };
               });
               setFVenta({ concepto: "", fecha: TODAY, ...Object.fromEntries(METODOS.map(m => [m.key, ""])) });
-              setFGasto({ concepto: "", monto: "", caja: "efectivo", categoria: "domicilio" });
+              setFGasto({ concepto: "", monto: "", caja: "efectivo", categoria: "Otros", descripcion: "" });
               setSheetVenta(false);
             }} className="w-full py-3 rounded-xl text-sm font-semibold bg-blue-700 hover:bg-blue-600 text-white transition-all">
               <span className="flex items-center justify-center gap-2"><Ic d={ICONS.check} s={15} /> Guardar</span>
