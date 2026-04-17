@@ -1794,6 +1794,7 @@ const S = { // styles
     const [editandoMov, setEditandoMov] = useState(null);
     const [editCampos, setEditCampos] = useState({});
     const [filaDesplegada, setFilaDesplegada] = useState(null);
+    const [verMesCompleto, setVerMesCompleto] = useState(false);
     // Guardado automático temporal en Firebase para gastos internos
     useEffect(() => {
       const tempGI = {
@@ -2002,6 +2003,13 @@ const S = { // styles
         ];
       });
     }, [historial, mesFiltro]);
+
+    const filasVentasMostradas = useMemo(() => {
+      const fechasUnicas = [...new Set(filasVentas.map(f => f.fecha))];
+      const fechasMostrar = verMesCompleto ? fechasUnicas : fechasUnicas.slice(-7);
+      const set = new Set(fechasMostrar);
+      return filasVentas.filter(f => set.has(f.fecha));
+    }, [filasVentas, verMesCompleto]);
 
     // Totales filtrados por mes
     const mesEntradas = useMemo(()=>Object.entries(historial).filter(([f])=>f.startsWith(mesFiltro)).map(([,v])=>v),[historial,mesFiltro]);
@@ -2485,12 +2493,12 @@ const S = { // styles
                 <tbody>
                   {filasVentas.length===0 ? (
                     <tr style={{background:"#0f172a"}}>
-                      <td colSpan={METODOS.length+2} className="py-6 text-center text-gray-600 text-xs">Sin registros</td>
+                      <td colSpan={METODOS.length+3} className="py-6 text-center text-gray-600 text-xs">Sin registros</td>
                     </tr>
                   ) : (() => {
                     // Agrupar pares por fecha para aplicar rowspan y bordes
                     let lastFecha = null;
-                    return filasVentas.flatMap((fila, i) => {
+                    return filasVentasMostradas.flatMap((fila, i) => {
                       const isIngreso = fila.tipo === "ingreso";
                       const isNewFecha = fila.fecha !== lastFecha;
                       if (isIngreso) lastFecha = fila.fecha;
@@ -2591,7 +2599,7 @@ const S = { // styles
                   })()}
 
                   {/* Filas vacías */}
-                  {Array.from({length:Math.max(0,10-filasVentas.length)}).map((_,i)=>(
+                  {Array.from({length:Math.max(0,10-filasVentasMostradas.length)}).map((_,i)=>(
                     <tr key={`empty${i}`} style={{background:i%2===0?"#0f172a":"#111827"}}>
                       <td className="border-r border-gray-700/30 py-1" style={{height:18}}/>
                       <td className="border-r border-gray-700/30"/>
@@ -2660,6 +2668,24 @@ const S = { // styles
                 </tfoot>
               </table>
             </div>
+
+            {/* ── TOGGLE VER MES COMPLETO ── */}
+            {(() => {
+              const totalDias = new Set(filasVentas.map(f => f.fecha)).size;
+              const diasOcultos = totalDias - Math.min(7, totalDias);
+              if (totalDias <= 7) return null;
+              return (
+                <button
+                  onClick={() => setVerMesCompleto(v => !v)}
+                  className="w-full mt-1 py-1.5 flex items-center justify-center gap-1.5 text-gray-500 hover:text-gray-300 border border-gray-800 hover:border-gray-600 rounded-lg transition-all"
+                  style={{fontSize:"10px"}}>
+                  <Ic d={verMesCompleto ? ICONS.up : ICONS.down} s={9}/>
+                  {verMesCompleto
+                    ? "Ver menos (últimos 7 días)"
+                    : `Ver mes completo (${diasOcultos} días más)`}
+                </button>
+              );
+            })()}
 
             {/* ── CALCULADORA BILLETES Y MONEDAS ── */}
             {showFondo && (
