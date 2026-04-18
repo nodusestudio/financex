@@ -20,6 +20,15 @@ const parseMoneyInput = (raw) => {
   return clean ? +clean : 0;
 };
 const uid = () => Math.random().toString(36).slice(2);
+
+// Normaliza texto: primera letra mayúscula, resto minúsculas, trim
+const normalizar = (texto) => {
+  if (!texto) return texto;
+  const t = texto.trim();
+  if (!t) return t;
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+};
+
 const todayStr = () => new Date().toISOString().split("T")[0];
 const nowStr   = () => new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
 const fmtDate  = (d) => new Date(d + "T12:00:00").toLocaleDateString("es-CO", { weekday:"short", day:"numeric", month:"short" });
@@ -740,7 +749,7 @@ export default function FinanceX() {
     const total = METODOS.reduce((a, m) => a + (+fVenta[m.key] || 0), 0);
     if (!total) return;
     const fecha = fVenta.fecha || TODAY;
-    const nueva = { id: uid(), hora: nowStr(), fecha, concepto: fVenta.concepto || "Ventas del día", ...Object.fromEntries(METODOS.map(m => [m.key, +fVenta[m.key] || 0])), total };
+    const nueva = { id: uid(), hora: nowStr(), fecha, concepto: normalizar(fVenta.concepto) || "Ventas del día", ...Object.fromEntries(METODOS.map(m => [m.key, +fVenta[m.key] || 0])), total };
     setHistorial(h => {
       const dia = h[fecha] || { ventas: [], gastos: [] };
       return { ...h, [fecha]: { ...dia, ventas: [...dia.ventas, nueva] } };
@@ -751,7 +760,7 @@ export default function FinanceX() {
 
   const guardarGasto = () => {
     if (!fGasto.concepto || !fGasto.monto) return;
-    const nuevo = { id: uid(), hora: nowStr(), concepto: fGasto.concepto, monto: +fGasto.monto, caja: fGasto.caja, categoria: fGasto.categoria };
+    const nuevo = { id: uid(), hora: nowStr(), concepto: normalizar(fGasto.concepto), monto: +fGasto.monto, caja: fGasto.caja, categoria: normalizar(fGasto.categoria) };
     setHistorial(h => {
       const dia = h[TODAY] || { ventas: [], gastos: [] };
       return { ...h, [TODAY]: { ...dia, gastos: [...dia.gastos, nuevo] } };
@@ -1639,8 +1648,8 @@ const S = { // styles
         const dia = h[fecha] || { ventas: [], gastos: [] };
         const nuevos = validas.map(r => ({
           id: uid(), hora: nowStr(), fecha,
-          concepto: r.concepto.trim(), monto: +r.monto,
-          caja: r.caja, categoria: "gasto diario"
+          concepto: normalizar(r.concepto), monto: +r.monto,
+          caja: r.caja, categoria: "Gasto diario"
         }));
         return { ...h, [fecha]: { ...dia, gastos: [...dia.gastos, ...nuevos] } };
       });
@@ -2121,8 +2130,8 @@ const S = { // styles
         const dia = h[fecha] || { ventas: [], gastos: [] };
         return { ...h, [fecha]: { ...dia, [tipo]: dia[tipo].map(item =>
           item.id !== mov.id ? item :
-          tipo === "ventas" ? { ...item, concepto: editCampos.concepto } :
-          { ...item, concepto: editCampos.concepto, monto: +editCampos.monto || item.monto }
+          tipo === "ventas" ? { ...item, concepto: normalizar(editCampos.concepto) } :
+          { ...item, concepto: normalizar(editCampos.concepto), monto: +editCampos.monto || item.monto }
         )}};
       });
       setEditandoMov(null);
