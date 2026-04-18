@@ -1901,7 +1901,15 @@ const S = { // styles
     const conceptosEgreso = useMemo(() => {
       const set = new Set();
       Object.values(historial).forEach(dia => {
-        dia.gastos?.forEach(g => { if (g.concepto?.trim()) set.add(g.concepto.trim()); });
+        dia.gastos?.forEach(g => { if (g.concepto?.trim()) set.add(normalizar(g.concepto)); });
+      });
+      return [...set].filter(Boolean).sort();
+    }, [historial]);
+
+    const conceptosIngreso = useMemo(() => {
+      const set = new Set();
+      Object.values(historial).forEach(dia => {
+        dia.ventas?.forEach(v => { if (v.concepto?.trim()) set.add(normalizar(v.concepto)); });
       });
       return [...set].filter(Boolean).sort();
     }, [historial]);
@@ -2198,6 +2206,9 @@ const S = { // styles
             <datalist id="datalist-conceptos-egreso">
               {conceptosEgreso.map(c => <option key={c} value={c}/>)}
             </datalist>
+            <datalist id="datalist-conceptos-ingreso">
+              {conceptosIngreso.map(c => <option key={c} value={c}/>)}
+            </datalist>
             <div className="flex gap-2">
               {[
                 {
@@ -2377,7 +2388,8 @@ const S = { // styles
                           <span style={{color:"#10b981", fontSize:"10px"}} className="font-medium">Efectivo</span>
                         </td>
                         <td className="border-r border-gray-700/40 px-0.5 py-0.5">
-                          <input className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
+                          <input list="datalist-conceptos-egreso"
+                            className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
                             style={{fontSize:"10px"}} placeholder="concepto…"
                             value={r.concepto} onChange={e=>updGI(r.id,"concepto",e.target.value)}/>
                         </td>
