@@ -2254,7 +2254,7 @@ const S = { // styles
                                     className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
                                     style={{fontSize:"10px"}} placeholder="concepto…"
                                     value={r.concepto} onChange={e=>cfg.upd(r.id,"concepto",e.target.value)}/>
-                                  {cfg.tieneCategoria && (
+                                  {cfg.tieneCategoria && (r.categoria && r.categoria !== "Otros") && (
                                     <select
                                       className="w-full bg-transparent text-gray-500 focus:outline-none cursor-pointer appearance-none"
                                       style={{fontSize:"9px",marginTop:1}}
