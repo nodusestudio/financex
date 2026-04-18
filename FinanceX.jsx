@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { collection, addDoc, doc, deleteDoc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, addDoc, doc, deleteDoc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
 import ViewMetricas from "./src/ViewMetricas.jsx";
 import * as XLSX from "xlsx";
@@ -636,33 +636,28 @@ export default function FinanceX() {
   useEffect(() => {
     let isActive = true;
 
-    const cargarDatos = async () => {
-      try {
-        // 1. Cargar datos locales (PRIMERO y como fuente de verdad)
-        const raw = localStorage.getItem(STORAGE_KEY);
-        const localData = raw ? JSON.parse(raw) : null;
+    // 1. Cargar datos locales inmediatamente
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const localData = raw ? JSON.parse(raw) : null;
+    if (localData?.historial) {
+      setHistorial(localData.historial);
+      setBackup(localData);
+    }
+    if (localData?.mesesGuardados) setMesesGuardados(localData.mesesGuardados);
+    if (localData?.conteo) setConteo({ ...conteoInicial(), ...localData.conteo });
 
-        if (localData?.historial) {
-          setHistorial(localData.historial);
-          setBackup(localData); // Guardar como backup
-        }
-        if (localData?.mesesGuardados) setMesesGuardados(localData.mesesGuardados);
-        if (localData?.conteo) setConteo({ ...conteoInicial(), ...localData.conteo });
-
-        // 2. Intentar cargar de Firestore (PERO CON VALORACIÓN CUIDADOSA)
-        try {
-          const snap = await getDoc(doc(db, "financex", "appData"));
+    // 2. Suscribir a Firestore en tiempo real con onSnapshot
+    let unsub = null;
+    try {
+      unsub = onSnapshot(
+        doc(db, "financex", "appData"),
+        (snap) => {
           if (!isActive) return;
-
           if (snap.exists()) {
             const cloud = snap.data();
-            
-            // ⚠️ VALIDACIÓN: Solo usar datos de nube si tienen contenido y son más recientes
             const esValidoCloud = cloud?.historial && Object.keys(cloud.historial || {}).length > 0;
             const cloudModerno = new Date(cloud.updatedAt || 0).getTime();
             const localModerno = new Date(localData?.updatedAt || 0).getTime();
-
-            // Solo sobrescribir SI la nube tiene datos Y ES MÁS RECIENTE
             if (esValidoCloud && cloudModerno > localModerno) {
               if (cloud.historial) setHistorial(cloud.historial);
               if (cloud.mesesGuardados) setMesesGuardados(cloud.mesesGuardados);
@@ -672,23 +667,30 @@ export default function FinanceX() {
               setSincroBloqueada(true);
               setMostrarRecuperar(true);
             }
+            setSyncStatus("✓ Sincronizado");
           }
-
-          setSyncStatus("Sincronizado");
-        } catch (fbError) {
+          setIsFirestoreReady(true);
+        },
+        (fbError) => {
           console.error("Error Firestore:", fbError);
-          if (isActive) setSyncStatus(localData ? "Modo offline (datos locales)" : "Error nube");
+          if (isActive) {
+            setSyncStatus(localData ? "Modo offline (datos locales)" : "Error nube");
+            alert("Error de conexión con la nube. Verifica tu sesión");
+            setIsFirestoreReady(true);
+          }
         }
-      } catch (error) {
-        console.error("Error cargando datos:", error);
-      } finally {
-        if (isActive) setIsFirestoreReady(true);
+      );
+    } catch (e) {
+      console.error("Error iniciando onSnapshot:", e);
+      if (isActive) {
+        setSyncStatus("Error nube");
+        setIsFirestoreReady(true);
       }
-    };
+    }
 
-    cargarDatos();
     return () => {
       isActive = false;
+      if (unsub) unsub();
     };
   }, []);
 
@@ -1931,7 +1933,21 @@ const S = { // styles
       Object.values(historial).forEach(dia => {
         dia.gastos?.forEach(g => { if (g.concepto?.trim()) set.add(normalizar(g.concepto)); });
       });
-      return [...set].filter(Boolean).sort();
+      // Deduplicar fuzzy: si dos conceptos son muy parecidos, mantener solo uno
+      const todos = [...set].filter(Boolean).sort();
+      const unicos = [];
+      for (const c of todos) {
+        const a = sinTildes(c);
+        const yaExiste = unicos.some(u => {
+          const b = sinTildes(u);
+          if (a === b) return true;
+          const dist = levenshtein(a, b);
+          const maxD = Math.max(1, Math.floor(Math.min(a.length, b.length) * 0.35));
+          return dist <= maxD;
+        });
+        if (!yaExiste) unicos.push(c);
+      }
+      return unicos;
     }, [historial]);
 
     const conceptosIngreso = useMemo(() => {
@@ -1939,7 +1955,20 @@ const S = { // styles
       Object.values(historial).forEach(dia => {
         dia.ventas?.forEach(v => { if (v.concepto?.trim()) set.add(normalizar(v.concepto)); });
       });
-      return [...set].filter(Boolean).sort();
+      const todos = [...set].filter(Boolean).sort();
+      const unicos = [];
+      for (const c of todos) {
+        const a = sinTildes(c);
+        const yaExiste = unicos.some(u => {
+          const b = sinTildes(u);
+          if (a === b) return true;
+          const dist = levenshtein(a, b);
+          const maxD = Math.max(1, Math.floor(Math.min(a.length, b.length) * 0.35));
+          return dist <= maxD;
+        });
+        if (!yaExiste) unicos.push(c);
+      }
+      return unicos;
     }, [historial]);
 
     // Calculadora local billetes/monedas (debajo de ventas por día)
