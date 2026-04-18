@@ -196,6 +196,18 @@ export default function FinanceX() {
     [historial]
   );
 
+  // Saldo solo del mes actual (para Neto en header)
+  const saldoMesActual = useMemo(() => {
+    const mesActual = todayStr().slice(0, 7);
+    return Object.entries(historial)
+      .filter(([f]) => f.startsWith(mesActual))
+      .reduce((acc, [, dia]) => {
+        const ingr = (dia.ventas || []).reduce((a, v) => a + METODOS.reduce((s, m) => s + (+v[m.key] || 0), 0), 0);
+        const egr  = (dia.gastos || []).reduce((a, g) => a + (+g.monto || 0), 0);
+        return acc + ingr - egr;
+      }, 0);
+  }, [historial]);
+
   const recuperarDatos = () => {
     if (!backup) return;
     
@@ -2750,15 +2762,15 @@ const S = { // styles
                     })}
                     <td/>
                   </tr>
-                  {/* Saldo del mes actual */}
+                  {/* Saldo del mes (única fila) */}
                   {(() => {
                     const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
                     const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
                     const saldoMes = totalIngr - totalEgr;
                     return (
-                      <tr className="border-t border-gray-600 bg-gray-800/60">
-                        <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-gray-400 font-bold" style={{fontSize:"9px"}}>
-                          Saldo del Mes
+                      <tr className="border-t border-blue-800/50 bg-blue-950/40">
+                        <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
+                          Saldo Total
                         </td>
                         <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
                           style={{fontSize:"11px", color: saldoMes>0?"#93c5fd":saldoMes<0?"#f87171":"#374151"}}>
@@ -2767,16 +2779,6 @@ const S = { // styles
                       </tr>
                     );
                   })()}
-                  {/* Saldo total global — coincide con Neto del header */}
-                  <tr className="border-t border-blue-800/50 bg-blue-950/40">
-                    <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
-                      Saldo Total
-                    </td>
-                    <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
-                      style={{fontSize:"11px", color: saldoTotalGlobal>0?"#93c5fd":saldoTotalGlobal<0?"#f87171":"#374151"}}>
-                      {saldoTotalGlobal!==0 ? fmtK(saldoTotalGlobal) : "—"}
-                    </td>
-                  </tr>
                 </tfoot>
               </table>
             </div>
@@ -3034,7 +3036,7 @@ const S = { // styles
             Reiniciar Todo
           </button>
           <div className="text-xs text-gray-500 font-mono">
-            Neto: <span className={saldoTotalGlobal >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoTotalGlobal)}</span>
+            Neto: <span className={saldoMesActual >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoMesActual)}</span>
           </div>
         </div>
       </header>
