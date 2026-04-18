@@ -29,6 +29,30 @@ const normalizar = (texto) => {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
 };
 
+// Detección fuzzy de conceptos similares (typos, plurales, tildes, guiones)
+const sinTildes = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[-\s]+/g,' ').trim();
+const levenshtein = (a, b) => {
+  const m=a.length, n=b.length;
+  if(!m) return n; if(!n) return m;
+  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+    dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  return dp[m][n];
+};
+const conceptoSimilar = (texto, lista) => {
+  if(!texto?.trim() || !lista?.length) return null;
+  const a = sinTildes(texto);
+  let mejor=null, mejorDist=Infinity;
+  for(const c of lista){
+    const b = sinTildes(c);
+    if(a===b) return null; // idéntico normalizado → sin aviso
+    const dist = levenshtein(a, b);
+    const maxD = Math.max(1, Math.floor(Math.min(a.length, b.length) * 0.35));
+    if(dist<=maxD && dist<mejorDist){ mejor=c; mejorDist=dist; }
+  }
+  return mejor;
+};
+
 const todayStr = () => new Date().toISOString().split("T")[0];
 const nowStr   = () => new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
 const fmtDate  = (d) => new Date(d + "T12:00:00").toLocaleDateString("es-CO", { weekday:"short", day:"numeric", month:"short" });
@@ -1804,6 +1828,10 @@ const S = { // styles
     const [editCampos, setEditCampos] = useState({});
     const [filaDesplegada, setFilaDesplegada] = useState(null);
     const [verMesCompleto, setVerMesCompleto] = useState(false);
+    // Avisos fuzzy de similitud en conceptos
+    const [avisoRow, setAvisoRow] = useState({});
+    const [avisoRowGI, setAvisoRowGI] = useState({});
+    const [avisoFGasto, setAvisoFGasto] = useState(null);
     // Guardado automático temporal en Firebase para gastos internos
     useEffect(() => {
       const tempGI = {
@@ -2273,7 +2301,17 @@ const S = { // styles
                                   <input list="datalist-conceptos-egreso"
                                     className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
                                     style={{fontSize:"10px"}} placeholder="concepto…"
-                                    value={r.concepto} onChange={e=>cfg.upd(r.id,"concepto",e.target.value)}/>
+                                    value={r.concepto}
+                                    onChange={e=>{cfg.upd(r.id,"concepto",e.target.value); setAvisoRow(a=>({...a,[r.id]:null}));}}
+                                    onBlur={e=>{const sug=conceptoSimilar(e.target.value,conceptosEgreso); setAvisoRow(a=>({...a,[r.id]:sug||null}));}}/>
+                                  {avisoRow[r.id] && (
+                                    <div style={{fontSize:"9px",color:"#fbbf24",marginTop:1,lineHeight:1.3}}>
+                                      ¿Quisiste decir <b style={{color:"#f59e0b"}}>"{avisoRow[r.id]}"</b>?{' '}
+                                      <span style={{cursor:"pointer",textDecoration:"underline"}} onMouseDown={e=>{e.preventDefault();cfg.upd(r.id,"concepto",avisoRow[r.id]);setAvisoRow(a=>({...a,[r.id]:null}));}}>Usar</span>
+                                      {' · '}
+                                      <span style={{cursor:"pointer",textDecoration:"underline"}} onMouseDown={e=>{e.preventDefault();setAvisoRow(a=>({...a,[r.id]:null}));}}>No</span>
+                                    </div>
+                                  )}
                                   {cfg.tieneCategoria && (r.categoria && r.categoria !== "Otros") && (
                                     <select
                                       className="w-full bg-transparent text-gray-500 focus:outline-none cursor-pointer appearance-none"
@@ -2391,7 +2429,17 @@ const S = { // styles
                           <input list="datalist-conceptos-egreso"
                             className="w-full bg-transparent text-gray-200 focus:outline-none placeholder-gray-700"
                             style={{fontSize:"10px"}} placeholder="concepto…"
-                            value={r.concepto} onChange={e=>updGI(r.id,"concepto",e.target.value)}/>
+                            value={r.concepto}
+                            onChange={e=>{updGI(r.id,"concepto",e.target.value); setAvisoRowGI(a=>({...a,[r.id]:null}));}}
+                            onBlur={e=>{const sug=conceptoSimilar(e.target.value,conceptosEgreso); setAvisoRowGI(a=>({...a,[r.id]:sug||null}));}}/>
+                          {avisoRowGI[r.id] && (
+                            <div style={{fontSize:"9px",color:"#fbbf24",marginTop:1,lineHeight:1.3}}>
+                              ¿Quisiste decir <b style={{color:"#f59e0b"}}>"{avisoRowGI[r.id]}"</b>?{' '}
+                              <span style={{cursor:"pointer",textDecoration:"underline"}} onMouseDown={e=>{e.preventDefault();updGI(r.id,"concepto",avisoRowGI[r.id]);setAvisoRowGI(a=>({...a,[r.id]:null}));}}>Usar</span>
+                              {' · '}
+                              <span style={{cursor:"pointer",textDecoration:"underline"}} onMouseDown={e=>{e.preventDefault();setAvisoRowGI(a=>({...a,[r.id]:null}));}}>No</span>
+                            </div>
+                          )}
                         </td>
                         <td className="px-0.5 py-0.5 relative">
                           <input type="text" inputMode="numeric"
@@ -3140,7 +3188,16 @@ const S = { // styles
                 <div>
                   <Lbl>Concepto egreso</Lbl>
                   <input className={inp} placeholder="Ej: Domicilio, turno..." value={fGasto.concepto}
-                    onChange={e => setFGasto(p => ({ ...p, concepto: e.target.value }))} />
+                    onChange={e => { setFGasto(p => ({ ...p, concepto: e.target.value })); setAvisoFGasto(null); }}
+                    onBlur={e => { const sug=conceptoSimilar(e.target.value,conceptosEgreso); setAvisoFGasto(sug||null); }} />
+                  {avisoFGasto && (
+                    <div style={{fontSize:"11px",color:"#fbbf24",marginTop:3}}>
+                      ¿Quisiste decir <b style={{color:"#f59e0b"}}>"{avisoFGasto}"</b>?{' '}
+                      <span style={{cursor:"pointer",textDecoration:"underline"}} onMouseDown={e=>{e.preventDefault();setFGasto(p=>({...p,concepto:avisoFGasto}));setAvisoFGasto(null);}}>Usar</span>
+                      {' · '}
+                      <span style={{cursor:"pointer",textDecoration:"underline"}} onMouseDown={e=>{e.preventDefault();setAvisoFGasto(null);}}>Ignorar</span>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Lbl>Categoría</Lbl>
