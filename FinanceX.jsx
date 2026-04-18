@@ -164,7 +164,7 @@ export default function FinanceX() {
   const saldoTotalGlobal = useMemo(
     () =>
       Object.values(historial).reduce((acc, dia) => {
-        const ventasDia = (dia.ventas || []).reduce((a, v) => a + (+v.total || 0), 0);
+        const ventasDia = (dia.ventas || []).reduce((a, v) => a + METODOS.reduce((s, m) => s + (+v[m.key] || 0), 0), 0);
         const gastosDia = (dia.gastos || []).reduce((a, g) => a + (+g.monto || 0), 0);
         return acc + ventasDia - gastosDia;
       }, 0),
@@ -2669,23 +2669,33 @@ const S = { // styles
                     })}
                     <td/>
                   </tr>
-                  {/* Saldo total global */}
+                  {/* Saldo del mes actual */}
                   {(() => {
                     const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
                     const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
-                    const saldo = totalIngr - totalEgr;
+                    const saldoMes = totalIngr - totalEgr;
                     return (
-                      <tr className="border-t border-blue-800/50 bg-blue-950/40">
-                        <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
-                          Saldo Total
+                      <tr className="border-t border-gray-600 bg-gray-800/60">
+                        <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-gray-400 font-bold" style={{fontSize:"9px"}}>
+                          Saldo del Mes
                         </td>
                         <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
-                          style={{fontSize:"11px", color: saldo>0?"#93c5fd":saldo<0?"#f87171":"#374151"}}>
-                          {saldo!==0 ? fmtK(saldo) : "—"}
+                          style={{fontSize:"11px", color: saldoMes>0?"#93c5fd":saldoMes<0?"#f87171":"#374151"}}>
+                          {saldoMes!==0 ? fmtK(saldoMes) : "—"}
                         </td>
                       </tr>
                     );
                   })()}
+                  {/* Saldo total global — coincide con Neto del header */}
+                  <tr className="border-t border-blue-800/50 bg-blue-950/40">
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
+                      Saldo Total
+                    </td>
+                    <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
+                      style={{fontSize:"11px", color: saldoTotalGlobal>0?"#93c5fd":saldoTotalGlobal<0?"#f87171":"#374151"}}>
+                      {saldoTotalGlobal!==0 ? fmtK(saldoTotalGlobal) : "—"}
+                    </td>
+                  </tr>
                 </tfoot>
               </table>
             </div>
