@@ -2455,7 +2455,7 @@ const S = { // styles
 
             {/* Header */}
             <div className="rounded-t-xl border border-gray-800/60 border-b-0 px-2 py-1.5 flex items-center justify-between gap-2" style={{background:"#16161D"}}>
-              <span className="text-xs font-bold text-gray-300 uppercase tracking-wider shrink-0">Ventas del Mes</span>
+              <span className="text-xs font-bold text-gray-300 uppercase tracking-wider shrink-0">Ventas</span>
               <input type="month" value={mesFiltro} onChange={e=>setMesFiltro(e.target.value)}
                 className="bg-transparent text-gray-400 focus:outline-none text-right"
                 style={{fontSize:"10px", maxWidth:100}}/>
