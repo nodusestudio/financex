@@ -2245,13 +2245,13 @@ const S = { // styles
                     <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
                       <colgroup>
                         {cfg.sinConcepto
-                          ? <><col style={{width:"58%"}}/><col style={{width:"42%"}}/></>
-                          : <><col style={{width:"18%"}}/><col style={{width:"52%"}}/><col style={{width:"30%"}}/></>
+                          ? <><col style={{width:"46%"}}/><col style={{width:"54%"}}/></>
+                          : <><col style={{width:"22%"}}/><col style={{width:"42%"}}/><col style={{width:"36%"}}/></>
                         }
                       </colgroup>
                       <thead>
                         <tr className="bg-gray-800/80">
-                          {(cfg.sinConcepto ? ["?? M�TODO","?? MONTO"] : ["?? M�TODO","?? CONCEPTO","?? MONTO"]).map(h=>(
+                          {(cfg.sinConcepto ? ["MÉTODO","MONTO"] : ["MÉTODO","CONCEPTO","MONTO"]).map(h=>(
                             <th key={h} className="border-b border-r border-gray-700 last:border-r-0 text-left px-1.5 py-1 text-gray-500 font-medium" style={{fontSize:"9px"}}>{h}</th>
                           ))}
                         </tr>
@@ -2372,10 +2372,10 @@ const S = { // styles
               </div>
               <div className="border border-gray-700 rounded-b-xl overflow-hidden">
                 <table className="w-full border-collapse" style={{tableLayout:"fixed"}}>
-                  <colgroup><col style={{width:"30%"}}/><col style={{width:"45%"}}/><col style={{width:"25%"}}/></colgroup>
+                  <colgroup><col style={{width:"24%"}}/><col style={{width:"43%"}}/><col style={{width:"33%"}}/></colgroup>
                   <thead>
                     <tr className="bg-gray-800/80">
-                      { ["?? M�TODO","?? CONCEPTO","?? MONTO"].map(h=>(
+                      { ["MÉTODO","CONCEPTO","MONTO"].map(h=>(
                         <th key={h} className="border-b border-r border-gray-700 last:border-r-0 text-left px-1.5 py-1 text-gray-500 font-medium" style={{fontSize:"9px"}}>{h}</th>
                       )) }
                     </tr>
