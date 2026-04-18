@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, addDoc, doc, deleteDoc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "./src/firebase.js";
 import ViewMetricas from "./src/ViewMetricas.jsx";
@@ -143,6 +143,7 @@ export default function FinanceX() {
   const [mostrarRecuperar, setMostrarRecuperar] = useState(false);
   const [backup, setBackup] = useState(null);
   const [sincroBloqueada, setSincroBloqueada] = useState(false);
+  const lastSavedAt = useRef(null); // evita bucle infinito onSnapshot ↔ setDoc
   const [mostrarVisualizador, setMostrarVisualizador] = useState(false);
 
   // Sheets
@@ -655,6 +656,8 @@ export default function FinanceX() {
           if (!isActive) return;
           if (snap.exists()) {
             const cloud = snap.data();
+            // Ignorar si este snapshot fue provocado por nuestro propio setDoc
+            if (cloud.updatedAt && cloud.updatedAt === lastSavedAt.current) return;
             const esValidoCloud = cloud?.historial && Object.keys(cloud.historial || {}).length > 0;
             const cloudModerno = new Date(cloud.updatedAt || 0).getTime();
             const localModerno = new Date(localData?.updatedAt || 0).getTime();
@@ -724,6 +727,7 @@ export default function FinanceX() {
       try {
         // Solo guardar en Firestore si hay datos válidos
         if (tieneDatos) {
+          lastSavedAt.current = payload.updatedAt; // registrar antes de escribir
           await setDoc(doc(db, "financex", "appData"), payload, { merge: true });
           if (!cancelled) setSyncStatus("✓ Sincronizado");
         } else {
