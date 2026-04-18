@@ -2801,10 +2801,16 @@ const S = { // styles
               );
             })()}
 
-            {/* ── CALCULADORA BILLETES Y MONEDAS ── */}
+            {/* ── CALCULADORA BILLETES Y MONEDAS (modal) ── */}
             {showFondo && (
-            <div className="mt-2 border border-gray-700 rounded-xl overflow-hidden">
-              <div className="overflow-x-auto">
+            <div className="fixed inset-0 z-50 flex items-center justify-center" style={{background:"rgba(0,0,0,0.7)"}} onClick={()=>setShowFondo(false)}>
+            <div className="rounded-2xl overflow-hidden shadow-2xl" style={{background:"#111118",border:"1px solid rgba(124,53,0,0.6)",maxWidth:"98vw"}} onClick={e=>e.stopPropagation()}>
+              {/* Header modal */}
+              <div className="flex items-center justify-between px-4 py-2.5" style={{background:"#7c3500"}}>
+                <span className="text-orange-100 font-bold text-sm tracking-wide">Fondo de Caja</span>
+                <button onClick={()=>setShowFondo(false)} className="text-orange-200 hover:text-white text-lg leading-none">&times;</button>
+              </div>
+              <div className="p-3 overflow-x-auto">
                 <table className="border-collapse" style={{tableLayout:"fixed", minWidth:"100%"}}>
                   <colgroup>
                     {DENOMS.map(d=><col key={d} style={{width:62}}/>)}
@@ -2873,6 +2879,7 @@ const S = { // styles
                   </tbody>
                 </table>
               </div>
+            </div>
             </div>
             )}
 
