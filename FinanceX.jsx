@@ -144,6 +144,7 @@ export default function FinanceX() {
   const [backup, setBackup] = useState(null);
   const [sincroBloqueada, setSincroBloqueada] = useState(false);
   const lastSavedAt = useRef(null); // evita bucle infinito onSnapshot ↔ setDoc
+  const isSaving = useRef(false); // flag: estamos escribiendo en Firestore ahora mismo
   const [mostrarVisualizador, setMostrarVisualizador] = useState(false);
 
   // Sheets
@@ -669,6 +670,7 @@ export default function FinanceX() {
           if (snap.exists()) {
             const cloud = snap.data();
             // Ignorar si este snapshot fue provocado por nuestro propio setDoc
+            if (isSaving.current) return;
             if (cloud.updatedAt && cloud.updatedAt === lastSavedAt.current) return;
             const esValidoCloud = cloud?.historial && Object.keys(cloud.historial || {}).length > 0;
             const cloudModerno = new Date(cloud.updatedAt || 0).getTime();
@@ -740,7 +742,10 @@ export default function FinanceX() {
         // Solo guardar en Firestore si hay datos válidos
         if (tieneDatos) {
           lastSavedAt.current = payload.updatedAt; // registrar antes de escribir
+          isSaving.current = true;
           await setDoc(doc(db, "financex", "appData"), payload, { merge: true });
+          // Mantener el flag activo 2s para cubrir el snapshot de respuesta de Firestore
+          setTimeout(() => { isSaving.current = false; }, 2000);
           if (!cancelled) setSyncStatus("✓ Sincronizado");
         } else {
           // Si está vacío, mantener localmente pero no sobrescribir nube
@@ -755,7 +760,7 @@ export default function FinanceX() {
     return () => {
       cancelled = true;
     };
-  }, [historial, mesesGuardados, conteo, isFirestoreReady, sincroBloqueada, STORAGE_KEY]);
+  }, [historial, mesesGuardados, conteo, isFirestoreReady, sincroBloqueada]);
 
   useEffect(() => {
     const onBeforeInstall = (event) => {
