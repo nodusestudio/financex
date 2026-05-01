@@ -951,8 +951,8 @@ const S = { // styles
             {new Date().toLocaleDateString("es-CO", { weekday:"long", day:"numeric", month:"long" })}
             <HoraBogotaRealtime />
           </span>
+
           // Componente para mostrar la hora en tiempo real en zona Bogotá
-          import { useEffect, useState } from "react";
           function HoraBogotaRealtime() {
             const [hora, setHora] = useState("");
             useEffect(() => {
