@@ -187,6 +187,19 @@ export default function FinanceX() {
     [totVentas, totGastosPorCaja]
   );
   const netoTotal = useMemo(() => granTotal - totGastos, [granTotal, totGastos]);
+
+  // Saldo histórico acumulado (ingresos - egresos de todos los días)
+  const saldoHistorico = useMemo(() => {
+    let totalIngresos = 0;
+    let totalEgresos = 0;
+    Object.values(historial).forEach(dia => {
+      METODOS.forEach(m => {
+        totalIngresos += dia.ventas?.reduce((a, v) => a + (+v[m.key] || 0), 0) || 0;
+      });
+      totalEgresos += dia.gastos?.reduce((a, g) => a + (+g.monto || 0), 0) || 0;
+    });
+    return totalIngresos - totalEgresos;
+  }, [historial]);
   const saldoTotalGlobal = useMemo(
     () =>
       Object.values(historial).reduce((acc, dia) => {
@@ -2768,22 +2781,15 @@ const S = { // styles
                     <td/>
                   </tr>
                   {/* Saldo del mes (única fila) */}
-                  {(() => {
-                    const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
-                    const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
-                    const saldoMes = totalIngr - totalEgr;
-                    return (
-                      <tr className="border-t border-blue-800/50 bg-blue-950/40">
-                        <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
-                          Saldo Total
-                        </td>
-                        <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
-                          style={{fontSize:"11px", color: saldoMes>0?"#93c5fd":saldoMes<0?"#f87171":"#374151"}}>
-                          {saldoMes!==0 ? fmtK(saldoMes) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })()}
+                  <tr className="border-t border-blue-800/50 bg-blue-950/40">
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
+                      Saldo Total
+                    </td>
+                    <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
+                      style={{fontSize:"11px", color: saldoHistorico>0?"#93c5fd":saldoHistorico<0?"#f87171":"#374151"}}>
+                      {saldoHistorico!==0 ? fmtK(saldoHistorico) : "—"}
+                    </td>
+                  </tr>
                 </tfoot>
               </table>
             </div>
