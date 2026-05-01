@@ -952,6 +952,7 @@ const S = { // styles
             <HoraBogotaRealtime />
           </span>
 
+
           // Componente para mostrar la hora en tiempo real en zona Bogotá
           function HoraBogotaRealtime() {
             const [hora, setHora] = useState("");
@@ -960,13 +961,23 @@ const S = { // styles
                 const now = new Date();
                 // Bogotá UTC-5
                 const bogota = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - (5 * 60 * 60 * 1000));
-                setHora(bogota.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+                setHora(
+                  bogota.toLocaleTimeString("es-CO", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit"
+                  })
+                );
               };
               update();
               const interval = setInterval(update, 1000);
               return () => clearInterval(interval);
             }, []);
-            return <span style={{marginLeft:8, fontSize:12, color:'#60a5fa', fontVariant:'tabular-nums'}}>{hora}</span>;
+            return (
+              <span style={{ marginLeft: 8, fontSize: 12, color: "#60a5fa", fontVariant: "tabular-nums" }}>
+                {hora}
+              </span>
+            );
           }
           <button onClick={() => setSheetVenta(true)}
             className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-medium bg-blue-900/20 border border-blue-800/50 px-2.5 py-1 rounded-lg transition-colors">
