@@ -953,7 +953,6 @@ const S = { // styles
           </span>
 
 
-          // Componente para mostrar la hora en tiempo real en zona Bogotá
 
           // Componente para mostrar la hora en tiempo real en zona Bogotá
           function HoraBogotaRealtime() {
