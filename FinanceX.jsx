@@ -954,6 +954,8 @@ const S = { // styles
 
 
           // Componente para mostrar la hora en tiempo real en zona Bogotá
+
+          // Componente para mostrar la hora en tiempo real en zona Bogotá
           function HoraBogotaRealtime() {
             const [hora, setHora] = useState("");
             useEffect(() => {
