@@ -2121,6 +2121,24 @@ const S = { // styles
 
     // Totales filtrados por mes
     const mesEntradas = useMemo(()=>Object.entries(historial).filter(([f])=>f.startsWith(mesFiltro)).map(([,v])=>v),[historial,mesFiltro]);
+
+    // Totales históricos acumulados por método de pago (ingresos - egresos)
+    const saldoHistoricoPorMetodo = useMemo(() => {
+      const totIngresos = Object.fromEntries(METODOS.map(m => [m.key, 0]));
+      const totEgresos = Object.fromEntries(METODOS.map(m => [m.key, 0]));
+      Object.values(historial).forEach(dia => {
+        METODOS.forEach(m => {
+          totIngresos[m.key] += (dia.ventas || []).reduce((a, v) => a + (+v[m.key] || 0), 0);
+        });
+        (dia.gastos || []).forEach(g => {
+          if (totEgresos[g.caja] !== undefined) {
+            totEgresos[g.caja] += +g.monto || 0;
+          }
+        });
+      });
+      return Object.fromEntries(METODOS.map(m => [m.key, totIngresos[m.key] - totEgresos[m.key]]));
+    }, [historial]);
+
     const totV = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,mesEntradas.flatMap(d=>d.ventas).reduce((a,v)=>a+(+v[m.key]||0),0)])),[mesEntradas]);
     const totG = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,mesEntradas.flatMap(d=>d.gastos).filter(g=>g.caja===m.key).reduce((a,g)=>a+(+g.monto||0),0)])),[mesEntradas]);
 
@@ -2765,12 +2783,12 @@ const S = { // styles
                     ))}
                     <td/>
                   </tr>
-                  {/* Total Saldo */}
+                  {/* Total Saldo (histórico acumulado por método) */}
                   <tr className="border-t-2 border-gray-500 bg-gray-800/80">
                     <td className="border-r border-gray-700/50 px-1 py-1 text-white font-bold" style={{fontSize:"9px"}}>Total Saldo</td>
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-blue-400">=</span></td>
                     {METODOS.map(m=>{
-                      const n=(totV[m.key]||0)-(totG[m.key]||0);
+                      const n = saldoHistoricoPorMetodo[m.key] || 0;
                       return (
                         <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold"
                           style={{fontSize:"10px",color:n>0?"#93c5fd":n<0?"#f87171":"#374151"}}>
