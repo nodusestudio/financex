@@ -187,6 +187,19 @@ export default function FinanceX() {
     [totVentas, totGastosPorCaja]
   );
   const netoTotal = useMemo(() => granTotal - totGastos, [granTotal, totGastos]);
+
+  // Saldo histórico acumulado (ingresos - egresos de todos los días)
+  const saldoHistorico = useMemo(() => {
+    let totalIngresos = 0;
+    let totalEgresos = 0;
+    Object.values(historial).forEach(dia => {
+      METODOS.forEach(m => {
+        totalIngresos += dia.ventas?.reduce((a, v) => a + (+v[m.key] || 0), 0) || 0;
+      });
+      totalEgresos += dia.gastos?.reduce((a, g) => a + (+g.monto || 0), 0) || 0;
+    });
+    return totalIngresos - totalEgresos;
+  }, [historial]);
   const saldoTotalGlobal = useMemo(
     () =>
       Object.values(historial).reduce((acc, dia) => {
@@ -935,8 +948,43 @@ const S = { // styles
         {/* Header */}
         <div className="px-3 pt-3 pb-2 flex items-center justify-between border-b border-gray-700">
           <span className={S.section}>
+<<<<<<< HEAD
             {new Date().toLocaleDateString("es-CO", { weekday:"long", day:"numeric", month:"long" })}
           </span>
+=======
+              {new Date().toLocaleDateString("es-CO", { weekday:"long", day:"numeric", month:"long" })}
+              <HoraBogotaRealtime />
+            </span>
+
+
+
+// Componente para mostrar la hora en tiempo real en zona Bogotá
+function HoraBogotaRealtime() {
+  const [hora, setHora] = useState("");
+  useEffect(() => {
+    const update = () => {
+      const now = new Date();
+      // Bogotá UTC-5
+      const bogota = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - (5 * 60 * 60 * 1000));
+      setHora(
+        bogota.toLocaleTimeString("es-CO", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      );
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <span style={{ marginLeft: 8, fontSize: 12, color: "#60a5fa", fontVariant: "tabular-nums" }}>
+      {hora}
+    </span>
+  );
+}
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
           <button onClick={() => setSheetVenta(true)}
             className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-medium bg-blue-900/20 border border-blue-800/50 px-2.5 py-1 rounded-lg transition-colors">
             <Ic d={ICONS.plus} s={13} c="#60a5fa" /> Registrar
@@ -2108,6 +2156,27 @@ const S = { // styles
 
     // Totales filtrados por mes
     const mesEntradas = useMemo(()=>Object.entries(historial).filter(([f])=>f.startsWith(mesFiltro)).map(([,v])=>v),[historial,mesFiltro]);
+<<<<<<< HEAD
+=======
+
+    // Totales históricos acumulados por método de pago (ingresos - egresos)
+    const saldoHistoricoPorMetodo = useMemo(() => {
+      const totIngresos = Object.fromEntries(METODOS.map(m => [m.key, 0]));
+      const totEgresos = Object.fromEntries(METODOS.map(m => [m.key, 0]));
+      Object.values(historial).forEach(dia => {
+        METODOS.forEach(m => {
+          totIngresos[m.key] += (dia.ventas || []).reduce((a, v) => a + (+v[m.key] || 0), 0);
+        });
+        (dia.gastos || []).forEach(g => {
+          if (totEgresos[g.caja] !== undefined) {
+            totEgresos[g.caja] += +g.monto || 0;
+          }
+        });
+      });
+      return Object.fromEntries(METODOS.map(m => [m.key, totIngresos[m.key] - totEgresos[m.key]]));
+    }, [historial]);
+
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
     const totV = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,mesEntradas.flatMap(d=>d.ventas).reduce((a,v)=>a+(+v[m.key]||0),0)])),[mesEntradas]);
     const totG = useMemo(()=>Object.fromEntries(METODOS.map(m=>[m.key,mesEntradas.flatMap(d=>d.gastos).filter(g=>g.caja===m.key).reduce((a,g)=>a+(+g.monto||0),0)])),[mesEntradas]);
 
@@ -2227,6 +2296,7 @@ const S = { // styles
       <div className="space-y-3">
         <style>{`.fodexa-scroll::-webkit-scrollbar{width:3px}.fodexa-scroll::-webkit-scrollbar-track{background:transparent}.fodexa-scroll::-webkit-scrollbar-thumb{background:#25252E;border-radius:4px}.fodexa-scroll::-webkit-scrollbar-thumb:hover{background:#374151}`}</style>
 
+<<<<<<< HEAD
         {/* ── TARJETAS BALANCE FODEXA ocultas ── */}
         {false && (
           <div className="grid grid-cols-3 gap-2">
@@ -2258,6 +2328,37 @@ const S = { // styles
             ))}
           </div>
         )}
+=======
+        {/* ── TARJETAS BALANCE FODEXA ── */}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label:"Ingresos del día", val:balanceFecha.ingr, icon:ICONS.up,    color:"#10b981", bg:"#061a0f", border:"#10b98130" },
+            { label:"Egresos del día",  val:balanceFecha.egr,  icon:ICONS.down,  color:"#f87171", bg:"#1a0606", border:"#f8717130" },
+            { label:"Neto del día",     val:balanceFecha.neto, icon:ICONS.check,
+              color: balanceFecha.neto >= 0 ? "#60a5fa" : "#f87171",
+              bg:    balanceFecha.neto >= 0 ? "#060f1a" : "#1a0606",
+              border:balanceFecha.neto >= 0 ? "#60a5fa30" : "#f8717130",
+              gradient: balanceFecha.neto >= 0 },
+          ].map(c => (
+            <div key={c.label}
+              className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5 transition-all duration-300 ease-in-out hover:brightness-110 hover:scale-[1.02]"
+              style={{background:c.bg, border:`1px solid ${c.border}`, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", boxShadow:`0 0 28px ${c.border}55, inset 0 1px 0 rgba(255,255,255,0.04)`}}>  
+              <div className="rounded-xl p-1.5 shrink-0" style={{background:c.color+"18"}}>
+                <Ic d={c.icon} s={14} c={c.color}/>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="uppercase tracking-widest text-gray-500" style={{fontSize:"8px"}}>{c.label}</div>
+                <div className="font-mono font-bold truncate"
+                  style={c.gradient
+                    ? {fontSize:"13px", background:"linear-gradient(135deg,#60a5fa,#818cf8)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"}
+                    : {color:c.color, fontSize:"13px"}}>
+                  {$(c.val)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
 
         {/* Fecha única compartida */}
         <div className="flex items-center gap-3 rounded-xl px-3 py-2" style={{background:"#16161D", border:"1px solid rgba(55,65,81,0.35)"}}>
@@ -2754,12 +2855,20 @@ const S = { // styles
                     ))}
                     <td/>
                   </tr>
+<<<<<<< HEAD
                   {/* Total Saldo */}
+=======
+                  {/* Total Saldo (histórico acumulado por método) */}
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
                   <tr className="border-t-2 border-gray-500 bg-gray-800/80">
                     <td className="border-r border-gray-700/50 px-1 py-1 text-white font-bold" style={{fontSize:"9px"}}>Total Saldo</td>
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-blue-400">=</span></td>
                     {METODOS.map(m=>{
+<<<<<<< HEAD
                       const n=(totV[m.key]||0)-(totG[m.key]||0);
+=======
+                      const n = saldoHistoricoPorMetodo[m.key] || 0;
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
                       return (
                         <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold"
                           style={{fontSize:"10px",color:n>0?"#93c5fd":n<0?"#f87171":"#374151"}}>
@@ -2770,6 +2879,7 @@ const S = { // styles
                     <td/>
                   </tr>
                   {/* Saldo del mes (única fila) */}
+<<<<<<< HEAD
                   {(() => {
                     const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
                     const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
@@ -2786,6 +2896,17 @@ const S = { // styles
                       </tr>
                     );
                   })()}
+=======
+                  <tr className="border-t border-blue-800/50 bg-blue-950/40">
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
+                      Saldo Total
+                    </td>
+                    <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
+                      style={{fontSize:"11px", color: saldoHistorico>0?"#93c5fd":saldoHistorico<0?"#f87171":"#374151"}}>
+                      {saldoHistorico!==0 ? fmtK(saldoHistorico) : "—"}
+                    </td>
+                  </tr>
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
                 </tfoot>
               </table>
             </div>
@@ -3011,6 +3132,7 @@ const S = { // styles
   return (
     <div className="h-screen w-screen bg-[#08080A] text-white flex flex-col overflow-hidden" style={{ fontFamily: "'Inter', -apple-system, sans-serif" }}>
 
+<<<<<<< HEAD
       {/* HEADER oculto */}
       {false && (
         <header className="shrink-0 z-30 border-b border-gray-800/30 px-4 py-3 flex items-center justify-between" style={{ backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", background: "rgba(8,8,10,0.97)" }}>
@@ -3056,6 +3178,51 @@ const S = { // styles
           </div>
         </header>
       )}
+=======
+      {/* HEADER */}
+      <header className="shrink-0 z-30 border-b border-gray-800/30 px-4 py-3 flex items-center justify-between" style={{ backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", background: "rgba(8,8,10,0.97)" }}>
+        <div className="flex items-center gap-2">
+          <img src="/Financex.png" alt="FinanceX" className="w-7 h-7 rounded-lg object-cover border border-gray-700" />
+          <span className="text-sm font-bold text-white">FinanceX</span>
+          <span className="text-xs text-gray-600 ml-1">{new Date().toLocaleDateString("es-CO", { day:"numeric", month:"short" })}</span>
+          <span className="text-xs text-gray-500 ml-2">{syncStatus}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {canInstallApp && (
+            <button
+              onClick={instalarApp}
+              className="text-xs text-emerald-300 hover:text-emerald-200 border border-emerald-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              Instalar App
+            </button>
+          )}
+          <button
+            onClick={() => setMostrarVisualizador(true)}
+            className="text-xs text-purple-400 hover:text-purple-300 border border-purple-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+            title="Ver datos en tablas"
+          >
+            📊 Ver Datos
+          </button>
+          <button
+            onClick={descargarBackup}
+            disabled={exportingBackup}
+            className={`text-xs border px-2.5 py-1.5 rounded-lg transition-colors ${exportingBackup ? "border-gray-700/40 text-gray-500 cursor-not-allowed" : "text-blue-400 hover:text-blue-300 border-blue-800/60"}`}
+            title="Descargar respaldo EXCEL"
+          >
+            {exportingBackup ? "⏳ Preparando..." : "💾 Excel"}
+          </button>
+          <button
+            onClick={reiniciarTodo}
+            className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            Reiniciar Todo
+          </button>
+          <div className="text-xs text-gray-500 font-mono">
+            Neto: <span className={saldoMesActual >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoMesActual)}</span>
+          </div>
+        </div>
+      </header>
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
 
       {/* ⚠️ ALERTA SINCRONIZACIÓN BLOQUEADA */}
       {sincroBloqueada && (
@@ -3100,8 +3267,13 @@ const S = { // styles
         </div>
       )}
 
+<<<<<<< HEAD
       {/* 💡 BANNER de recuperación rápida oculto */}
       {false && (!sincroBloqueada && Object.keys(historial).length > 0) && (
+=======
+      {/* 💡 BANNER de recuperación rápida SI has descargado datos */}
+      {!sincroBloqueada && Object.keys(historial).length > 0 && (
+>>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
         <div className="bg-blue-900/30 border-b border-blue-700/50 px-4 py-2 flex items-center justify-between gap-2">
           <div className="text-xs text-blue-300 flex-1">
             📌 <strong>{Object.keys(historial).length}</strong> días registrados | <strong>{Object.keys(mesesGuardados).length}</strong> meses guardados
