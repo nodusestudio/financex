@@ -1268,9 +1268,38 @@ function HoraBogotaRealtime() {
         const ingresos = METODOS.reduce((a, m) => a + dia.ventas.reduce((s, v) => s + (+v[m.key] || 0), 0), 0);
         const egresos = METODOS.reduce((a, m) => a + dia.gastos.filter(g => g.caja === m.key).reduce((s, g) => s + (+g.monto || 0), 0), 0);
         return {
-          fecha,
-          ingresos,
-          egresos,
+            {new Date().toLocaleDateString("es-CO", { weekday:"long", day:"numeric", month:"long" })}
+              <HoraBogotaRealtime />
+            </span>
+
+
+
+// Componente para mostrar la hora en tiempo real en zona Bogotá
+function HoraBogotaRealtime() {
+  const [hora, setHora] = useState("");
+  useEffect(() => {
+    const update = () => {
+      const now = new Date();
+      // Bogotá UTC-5
+      const bogota = new Date(now.getTime() - (now.getTimezoneOffset() * 60000) - (5 * 60 * 60 * 1000));
+      setHora(
+        bogota.toLocaleTimeString("es-CO", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      );
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <span style={{ marginLeft: 8, fontSize: 12, color: "#60a5fa", fontVariant: "tabular-nums" }}>
+      {hora}
+    </span>
+  );
+}
           saldo: ingresos - egresos,
         };
       });
@@ -2865,7 +2894,7 @@ function HoraBogotaRealtime() {
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-blue-400">=</span></td>
                     {METODOS.map(m=>{
 <<<<<<< HEAD
-                      const n=(totV[m.key]||0)-(totG[m.key]||0);
+                      const n = saldoHistoricoPorMetodo[m.key] || 0;
 =======
                       const n = saldoHistoricoPorMetodo[m.key] || 0;
 >>>>>>> 137996fc9b047deaa79f7d2e3dc7097aff50dec7
@@ -2880,22 +2909,15 @@ function HoraBogotaRealtime() {
                   </tr>
                   {/* Saldo del mes (única fila) */}
 <<<<<<< HEAD
-                  {(() => {
-                    const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
-                    const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
-                    const saldoMes = totalIngr - totalEgr;
-                    return (
-                      <tr className="border-t border-blue-800/50 bg-blue-950/40">
-                        <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
-                          Saldo Total
-                        </td>
-                        <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
-                          style={{fontSize:"11px", color: saldoMes>0?"#93c5fd":saldoMes<0?"#f87171":"#374151"}}>
-                          {saldoMes!==0 ? fmtK(saldoMes) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })()}
+                  <tr className="border-t border-blue-800/50 bg-blue-950/40">
+                    <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
+                      Saldo Total
+                    </td>
+                    <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
+                      style={{fontSize:"11px", color: saldoHistorico>0?"#93c5fd":saldoHistorico<0?"#f87171":"#374151"}}>
+                      {saldoHistorico!==0 ? fmtK(saldoHistorico) : "—"}
+                    </td>
+                  </tr>
 =======
                   <tr className="border-t border-blue-800/50 bg-blue-950/40">
                     <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
