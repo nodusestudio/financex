@@ -1,0 +1,25 @@
+{
+  "name": "FinanceX",
+  "short_name": "FinanceX",
+  "description": "Control de caja diaria, historial y fondo de caja.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "icons": [
+    {
+      "src": "/Financex.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/Financex.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

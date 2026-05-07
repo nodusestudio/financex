@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /financex/{document} {
+      allow read, write: if true;
+    }
+    match /financex_temp/{document} {
+      allow read, write: if true;
+    }
+    match /movimientos/{document} {
+      allow read, write: if true;
+    }
+  }
+}
