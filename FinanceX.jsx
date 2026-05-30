@@ -2101,7 +2101,7 @@ const S = { // styles
 
     const filasVentasMostradas = useMemo(() => {
       const fechasUnicas = [...new Set(filasVentas.map(f => f.fecha))];
-      const fechasMostrar = verMesCompleto ? fechasUnicas : fechasUnicas.slice(-7);
+      const fechasMostrar = verMesCompleto ? fechasUnicas : fechasUnicas.slice(-3);
       const set = new Set(fechasMostrar);
       return filasVentas.filter(f => set.has(f.fecha));
     }, [filasVentas, verMesCompleto]);
@@ -2227,36 +2227,6 @@ const S = { // styles
       <div className="space-y-3">
         <style>{`.fodexa-scroll::-webkit-scrollbar{width:3px}.fodexa-scroll::-webkit-scrollbar-track{background:transparent}.fodexa-scroll::-webkit-scrollbar-thumb{background:#25252E;border-radius:4px}.fodexa-scroll::-webkit-scrollbar-thumb:hover{background:#374151}`}</style>
 
-        {/* ── TARJETAS BALANCE FODEXA ── */}
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label:"Ingresos del día", val:balanceFecha.ingr, icon:ICONS.up,    color:"#10b981", bg:"#061a0f", border:"#10b98130" },
-            { label:"Egresos del día",  val:balanceFecha.egr,  icon:ICONS.down,  color:"#f87171", bg:"#1a0606", border:"#f8717130" },
-            { label:"Neto del día",     val:balanceFecha.neto, icon:ICONS.check,
-              color: balanceFecha.neto >= 0 ? "#60a5fa" : "#f87171",
-              bg:    balanceFecha.neto >= 0 ? "#060f1a" : "#1a0606",
-              border:balanceFecha.neto >= 0 ? "#60a5fa30" : "#f8717130",
-              gradient: balanceFecha.neto >= 0 },
-          ].map(c => (
-            <div key={c.label}
-              className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5 transition-all duration-300 ease-in-out hover:brightness-110 hover:scale-[1.02]"
-              style={{background:c.bg, border:`1px solid ${c.border}`, backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", boxShadow:`0 0 28px ${c.border}55, inset 0 1px 0 rgba(255,255,255,0.04)`}}>  
-              <div className="rounded-xl p-1.5 shrink-0" style={{background:c.color+"18"}}>
-                <Ic d={c.icon} s={14} c={c.color}/>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="uppercase tracking-widest text-gray-500" style={{fontSize:"8px"}}>{c.label}</div>
-                <div className="font-mono font-bold truncate"
-                  style={c.gradient
-                    ? {fontSize:"13px", background:"linear-gradient(135deg,#60a5fa,#818cf8)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text"}
-                    : {color:c.color, fontSize:"13px"}}>
-                  {$(c.val)}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
         {/* Fecha única compartida */}
         <div className="flex items-center gap-3 rounded-xl px-3 py-2" style={{background:"#16161D", border:"1px solid rgba(55,65,81,0.35)"}}>
           <span className="text-xs text-gray-500 uppercase tracking-wider font-medium">Fecha</span>
@@ -2267,12 +2237,6 @@ const S = { // styles
             className="text-xs text-orange-300 hover:text-orange-200 border border-orange-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
           >
             Fondo: {$(totalMenor)}
-          </button>
-          <button
-            onClick={() => reiniciarFecha(fechaI)}
-            className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            Reiniciar Fecha
           </button>
         </div>
 
@@ -2791,7 +2755,7 @@ const S = { // styles
             {/* ── TOGGLE VER MES COMPLETO ── */}
             {(() => {
               const totalDias = new Set(filasVentas.map(f => f.fecha)).size;
-              const diasOcultos = totalDias - Math.min(7, totalDias);
+              const diasOcultos = totalDias - Math.min(3, totalDias);
               if (totalDias <= 7) return null;
               return (
                 <button
@@ -2800,7 +2764,7 @@ const S = { // styles
                   style={{fontSize:"10px"}}>
                   <Ic d={verMesCompleto ? ICONS.up : ICONS.down} s={9}/>
                   {verMesCompleto
-                    ? "Ver menos (últimos 7 días)"
+                    ? "Ver menos (últimos 3 días)"
                     : `Ver mes completo (${diasOcultos} días más)`}
                 </button>
               );
@@ -3016,40 +2980,6 @@ const S = { // styles
           <span className="text-sm font-bold text-white">FinanceX</span>
           <span className="text-xs text-gray-600 ml-1">{new Date().toLocaleDateString("es-CO", { day:"numeric", month:"short" })}</span>
           <span className="text-xs text-gray-500 ml-2">{syncStatus}</span>
-        </div>
-        <div className="flex items-center gap-3">
-          {canInstallApp && (
-            <button
-              onClick={instalarApp}
-              className="text-xs text-emerald-300 hover:text-emerald-200 border border-emerald-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
-            >
-              Instalar App
-            </button>
-          )}
-          <button
-            onClick={() => setMostrarVisualizador(true)}
-            className="text-xs text-purple-400 hover:text-purple-300 border border-purple-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
-            title="Ver datos en tablas"
-          >
-            📊 Ver Datos
-          </button>
-          <button
-            onClick={descargarBackup}
-            disabled={exportingBackup}
-            className={`text-xs border px-2.5 py-1.5 rounded-lg transition-colors ${exportingBackup ? "border-gray-700/40 text-gray-500 cursor-not-allowed" : "text-blue-400 hover:text-blue-300 border-blue-800/60"}`}
-            title="Descargar respaldo EXCEL"
-          >
-            {exportingBackup ? "⏳ Preparando..." : "💾 Excel"}
-          </button>
-          <button
-            onClick={reiniciarTodo}
-            className="text-xs text-red-400 hover:text-red-300 border border-red-800/60 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            Reiniciar Todo
-          </button>
-          <div className="text-xs text-gray-500 font-mono">
-            Neto: <span className={saldoMesActual >= 0 ? "text-emerald-400" : "text-red-400"}>{$(saldoMesActual)}</span>
-          </div>
         </div>
       </header>
 
