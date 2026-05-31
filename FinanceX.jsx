@@ -75,8 +75,8 @@ const CAJAS_GASTO = ["efectivo", "bancolombia", "nequi", "bold", "aliados"];
 
 const CATEGORIAS_EGRESO = ["Insumos", "Nómina", "Servicios Públicos", "Marketing", "Mantenimiento", "Otros"];
 
-const BILLETES = [100000, 50000, 20000, 10000, 5000, 2000, 1000];
-const MONEDAS  = [500, 200, 100, 50];
+const BILLETES = [2000, 5000, 10000, 20000, 50000, 100000];
+const MONEDAS  = [50, 100, 200, 500, 1000];
 
 // ── MINI COMPONENTS ───────────────────────────────────────────────────────────
 const Ic = ({ d, s = 16, c = "currentColor" }) => (
@@ -1226,19 +1226,6 @@ const S = { // styles
         </div>
 
         <div className="grid gap-4 xl:grid-cols-3">
-          <div className="rounded-[26px] border border-emerald-700/20 bg-gradient-to-br from-emerald-950/35 via-[#11131a] to-[#0c1117] p-4 md:p-5 space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] text-emerald-300 uppercase tracking-[0.25em] font-semibold">Billetes</div>
-                <div className="text-sm text-gray-400 mt-1">Conteo alto valor</div>
-              </div>
-              <div className="text-xl font-bold font-mono text-emerald-300">{$(billeteTotal)}</div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              {BILLETES.map(d => <DenomCard key={d} d={d} tone="bill" />)}
-            </div>
-          </div>
-
           <div className="rounded-[26px] border border-sky-700/20 bg-gradient-to-br from-sky-950/35 via-[#10141c] to-[#0b1018] p-4 md:p-5 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1249,6 +1236,19 @@ const S = { // styles
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
               {MONEDAS.map(d => <DenomCard key={d} d={d} tone="coin" />)}
+            </div>
+          </div>
+
+          <div className="rounded-[26px] border border-emerald-700/20 bg-gradient-to-br from-emerald-950/35 via-[#11131a] to-[#0c1117] p-4 md:p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] text-emerald-300 uppercase tracking-[0.25em] font-semibold">Billetes</div>
+                <div className="text-sm text-gray-400 mt-1">Conteo alto valor</div>
+              </div>
+              <div className="text-xl font-bold font-mono text-emerald-300">{$(billeteTotal)}</div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              {BILLETES.map(d => <DenomCard key={d} d={d} tone="bill" />)}
             </div>
           </div>
 

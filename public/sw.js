@@ -1,4 +1,4 @@
-const CACHE_NAME = "financex-cache-v3";
+const CACHE_NAME = "financex-cache-v4";
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/Financex.png"

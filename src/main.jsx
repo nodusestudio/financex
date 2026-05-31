@@ -3,7 +3,18 @@ import ReactDOM from "react-dom/client";
 import FinanceX from "../FinanceX.jsx";
 import "./firebase.js";
 
-const CURRENT_CACHE = "financex-cache-v3";
+const CURRENT_CACHE = "financex-cache-v4";
+const IS_LOCALHOST = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+async function limpiarTodoSW() {
+  if (!("serviceWorker" in navigator) || !("caches" in window)) return;
+
+  const registros = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registros.map((registro) => registro.unregister()));
+
+  const cacheKeys = await caches.keys();
+  await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+}
 
 async function limpiarSWsViejos() {
   if (!("serviceWorker" in navigator) || !("caches" in window)) return false;
@@ -30,10 +41,14 @@ async function limpiarSWsViejos() {
 }
 
 async function iniciarApp() {
+  if (IS_LOCALHOST) {
+    await limpiarTodoSW();
+  }
+
   const recargando = await limpiarSWsViejos();
   if (recargando) return; // La página se va a recargar, no renderizar aún
 
-  if ("serviceWorker" in navigator) {
+  if (!IS_LOCALHOST && "serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("/sw.js").catch((err) => {
         console.error("Service Worker error:", err);
