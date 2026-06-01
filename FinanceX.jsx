@@ -2134,7 +2134,7 @@ const S = { // styles
         <div className={`${S.card} overflow-hidden`}>
 
           {/* Header columnas */}
-          <div className="grid border-b border-gray-700 bg-gray-800/70" style={{ gridTemplateColumns: "1fr 1fr 80px 28px" }}>
+          <div className="grid border-b border-gray-700 bg-gray-800/70" style={{ gridTemplateColumns: "minmax(110px,1fr) minmax(140px,1.1fr) minmax(96px,0.7fr) 44px" }}>
             {["?? M�TODO DE PAGO", "?? CONCEPTO", "?? MONTO", ""].map((h, i) => (
               <div key={i} className="px-2 py-2 text-xs text-gray-500 font-medium border-r border-gray-700/50 last:border-r-0">{h}</div>
             ))}
@@ -2146,7 +2146,7 @@ const S = { // styles
             const disponible = (totVentas[fila.caja] || 0) - (totGastosPorCaja[fila.caja] || 0);
             return (
               <div key={fila.id} className="grid border-b border-gray-700/40 last:border-b-0 hover:bg-gray-800/30 transition-colors group"
-                style={{ gridTemplateColumns: "1fr 1fr 80px 28px" }}>
+                style={{ gridTemplateColumns: "minmax(110px,1fr) minmax(140px,1.1fr) minmax(96px,0.7fr) 44px" }}>
 
                 {/* Método */}
                 <div className="border-r border-gray-700/50 p-1.5">
@@ -2178,7 +2178,7 @@ const S = { // styles
                 </div>
 
                 {/* Monto */}
-                <div className="border-r border-gray-700/50 p-1.5">
+                <div className="border-r border-gray-700/50 px-2 py-1.5">
                   <input
                     type="number" inputMode="numeric"
                     className="w-full bg-transparent text-xs font-mono text-right focus:outline-none placeholder-gray-700"
@@ -2189,9 +2189,9 @@ const S = { // styles
                 </div>
 
                 {/* Eliminar */}
-                <div className="flex items-center justify-center">
+                <div className="flex items-center justify-center px-1">
                   <button onClick={() => eliminarFila(fila.id)}
-                    className="opacity-0 group-hover:opacity-100 text-gray-700 hover:text-red-400 transition-all">
+                    className="opacity-70 md:opacity-0 md:group-hover:opacity-100 text-gray-700 hover:text-red-400 transition-all p-1">
                     <Ic d={ICONS.trash} s={12} />
                   </button>
                 </div>
@@ -2269,12 +2269,14 @@ const S = { // styles
       const temp = {
         rowsI,
         rowsG,
+        rowsGI,
         fechaI,
         fechaG,
       };
+      localStorage.setItem(TEMP_FORM_KEY, JSON.stringify(temp));
       // Guardar en Firebase (colección temporal)
       setDoc(doc(db, "financex_temp", "formData"), temp, { merge: true });
-    }, [rowsI, rowsG, fechaI, fechaG]);
+    }, [rowsI, rowsG, rowsGI, fechaI, fechaG]);
     // Restaurar datos temporales desde Firebase al abrir la app
     useEffect(() => {
       (async () => {
@@ -2284,6 +2286,7 @@ const S = { // styles
             const temp = snap.data();
             if (temp.rowsI) setRowsI(temp.rowsI);
             if (temp.rowsG) setRowsG(temp.rowsG);
+            if (temp.rowsGI) setRowsGI(temp.rowsGI);
             if (temp.fechaI) setFechaI(temp.fechaI);
             if (temp.fechaG) setFechaG(temp.fechaG);
           }
@@ -2297,6 +2300,7 @@ const S = { // styles
           const temp = JSON.parse(tempRaw);
           if (temp.rowsI) setRowsI(temp.rowsI);
           if (temp.rowsG) setRowsG(temp.rowsG);
+          if (temp.rowsGI) setRowsGI(temp.rowsGI);
           if (temp.fechaI) setFechaI(temp.fechaI);
           if (temp.fechaG) setFechaG(temp.fechaG);
         } catch {}
@@ -2728,17 +2732,20 @@ const S = { // styles
                                   )}
                                 </td>
                               )}
-                              <td className="px-0.5 py-0.5 relative">
-                                <input type="text" inputMode="numeric"
-                                  className="w-full bg-transparent font-mono text-right focus:outline-none placeholder-gray-700"
-                                  style={{fontSize:"10px",color:r.monto?cfg.montoColor:undefined}}
-                                  placeholder="$ 0"
-                                  value={formatMoneyInput(r.monto)}
-                                  onChange={e=>cfg.upd(r.id,"monto",parseMoneyInput(e.target.value))}/>
-                                <button onClick={()=>cfg.del(r.id)}
-                                  className="absolute right-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition-all pr-0.5">
-                                  <Ic d={ICONS.trash} s={9}/>
-                                </button>
+                              <td className="px-0.5 py-0.5">
+                                <div className="flex items-center gap-1">
+                                  <input type="text" inputMode="numeric"
+                                    className="min-w-0 flex-1 bg-transparent font-mono text-right focus:outline-none placeholder-gray-700"
+                                    style={{fontSize:"10px",color:r.monto?cfg.montoColor:undefined}}
+                                    placeholder="$ 0"
+                                    value={formatMoneyInput(r.monto)}
+                                    onChange={e=>cfg.upd(r.id,"monto",parseMoneyInput(e.target.value))}/>
+                                  <button onClick={()=>cfg.del(r.id)}
+                                    className="shrink-0 rounded p-0.5 text-gray-600 opacity-70 transition-all hover:text-red-400 md:opacity-0 md:group-hover:opacity-100"
+                                    title="Eliminar fila">
+                                    <Ic d={ICONS.trash} s={9}/>
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -3153,35 +3160,6 @@ const S = { // styles
                   <div className="grid gap-1.5 md:grid-cols-2">
                     <div className="rounded-[11px] border border-slate-700/60 bg-slate-900/55 p-1.5 space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[9px] uppercase tracking-[0.16em] text-slate-300/80 font-semibold">Billetes</span>
-                        <span className="font-mono font-bold text-[11px] text-emerald-200">{fmtVal(totalBilletesModal)}</span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-1.5">
-                        {BILLETES.map(d => {
-                          const subtotal = d * (conteoLocal[d] || 0);
-                          return (
-                            <div key={d} className="rounded-[9px] border border-slate-800 bg-[#0d1319] px-2 py-1.5">
-                              <div className="grid grid-cols-[auto_58px_44px] items-center gap-1 text-[9px]">
-                                <span className="font-bold text-emerald-100 leading-none">{fmtDenom(d)}</span>
-                                <span className="font-mono text-gray-500 text-right truncate">{subtotal > 0 ? fmtDenom(subtotal) : "$0"}</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                className="w-full rounded-md bg-black/30 border border-slate-700/70 px-1 py-1 text-center font-mono text-[10px] text-white outline-none focus:border-emerald-400/30"
-                                placeholder="0"
-                                value={conteoLocal[d] || ""}
-                                onChange={e=>setConteoLocal(c=>({...c,[d]:+e.target.value||0}))}
-                              />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[11px] border border-slate-700/60 bg-slate-900/55 p-1.5 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
                         <span className="text-[9px] uppercase tracking-[0.16em] text-slate-300/80 font-semibold">Monedas</span>
                         <span className="font-mono font-bold text-[11px] text-sky-200">{fmtVal(totalMonedas)}</span>
                       </div>
@@ -3198,6 +3176,35 @@ const S = { // styles
                                 inputMode="numeric"
                                 min="0"
                                 className="w-full rounded-md bg-black/30 border border-slate-700/70 px-1 py-1 text-center font-mono text-[10px] text-white outline-none focus:border-sky-400/30"
+                                placeholder="0"
+                                value={conteoLocal[d] || ""}
+                                onChange={e=>setConteoLocal(c=>({...c,[d]:+e.target.value||0}))}
+                              />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[11px] border border-slate-700/60 bg-slate-900/55 p-1.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[9px] uppercase tracking-[0.16em] text-slate-300/80 font-semibold">Billetes</span>
+                        <span className="font-mono font-bold text-[11px] text-emerald-200">{fmtVal(totalBilletesModal)}</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {BILLETES.map(d => {
+                          const subtotal = d * (conteoLocal[d] || 0);
+                          return (
+                            <div key={d} className="rounded-[9px] border border-slate-800 bg-[#0d1319] px-2 py-1.5">
+                              <div className="grid grid-cols-[auto_58px_44px] items-center gap-1 text-[9px]">
+                                <span className="font-bold text-emerald-100 leading-none">{fmtDenom(d)}</span>
+                                <span className="font-mono text-gray-500 text-right truncate">{subtotal > 0 ? fmtDenom(subtotal) : "$0"}</span>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                className="w-full rounded-md bg-black/30 border border-slate-700/70 px-1 py-1 text-center font-mono text-[10px] text-white outline-none focus:border-emerald-400/30"
                                 placeholder="0"
                                 value={conteoLocal[d] || ""}
                                 onChange={e=>setConteoLocal(c=>({...c,[d]:+e.target.value||0}))}
@@ -3348,13 +3355,13 @@ const S = { // styles
                           {mov.categoria || (isIngreso ? "Ventas" : "—")}
                         </span>
                       </td>
-                      <td className={`px-2 py-1.5 text-right font-mono font-bold border-r border-gray-800/40 ${isIngreso ? "text-emerald-400" : "text-red-400"}`} style={{fontSize:"11px"}}>
+                      <td className={`px-2.5 py-1.5 text-right font-mono font-bold border-r border-gray-800/40 ${isIngreso ? "text-emerald-400" : "text-red-400"}`} style={{fontSize:"11px"}}>
                         {editandoMov === mov.id
                           ? <input type="number" className="w-full bg-transparent text-right font-mono font-bold focus:outline-none border-b border-blue-500/50" style={{color:isIngreso?"#34d399":"#f87171",fontSize:"11px"}} value={editCampos.monto} onChange={e=>setEditCampos(c=>({...c,monto:e.target.value}))}/>
                           : (isIngreso ? `+${$(Number(mov.total || 0))}` : `−${$(Number(mov.monto || 0))}`)}
                       </td>
-                      <td className="px-1 py-1.5 text-center overflow-hidden" style={{width:52,minWidth:52,maxWidth:52}}>
-                        <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <td className="px-1.5 py-1.5 text-center overflow-hidden" style={{width:64,minWidth:64,maxWidth:64}}>
+                        <div className="flex items-center justify-center gap-1 opacity-70 md:opacity-0 md:group-hover:opacity-100 transition-all">
                           {editandoMov === mov.id ? (
                             <button
                               onClick={() => editarMovGuardado(mov)}
