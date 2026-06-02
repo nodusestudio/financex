@@ -930,85 +930,6 @@ const S = { // styles
   // ════════════════════════════════════════════════════════════════════════
   // VIEW: CIERRE DE CAJA (CON RESUMEN VISUAL)
   // ════════════════════════════════════════════════════════════════════════
-  // Helpers: compute final/initial balances per-method and per-month (recursive, safe)
-  const getUltimoMesAnteriorAll = (mesesObj, historial, mesFiltro) => {
-    if (!mesFiltro) return null;
-    const allMeses = new Set();
-    if (mesesObj && typeof mesesObj === 'object') {
-      Object.keys(mesesObj).forEach(m => { if (m) allMeses.add(m); });
-    }
-    if (historial && typeof historial === 'object') {
-      Object.keys(historial).forEach(fecha => {
-        if (typeof fecha === 'string' && fecha.length >= 7) allMeses.add(fecha.slice(0, 7));
-      });
-    }
-    allMeses.add(mesFiltro);
-    const meses = Array.from(allMeses).sort();
-    const idx = meses.indexOf(mesFiltro);
-    if (idx <= 0) return null;
-    return meses[idx - 1];
-  };
-
-  // Compute final balance for a method considering saved months and historial recursively.
-  const getSaldoFinalPorMetodoAll = (mesesObj, historial, mesFiltro, metodo, _seen = new Set()) => {
-    if (!mesFiltro) return 0;
-    const seenKey = `${mesFiltro}|${metodo}`;
-    if (_seen.has(seenKey)) return 0;
-    _seen.add(seenKey);
-
-    const mg = mesesObj?.[mesFiltro];
-    if (mg) {
-      const monthEntries = Object.entries(historial || {}).filter(([f]) => f.startsWith(mesFiltro));
-      const hasHistoryMonth = monthEntries.length > 0;
-      const saldoInicial = mg.saldoInicialPorMetodo?.[metodo] ?? getSaldoInicialPorMetodoAll(mesesObj, historial, mesFiltro, metodo, _seen);
-      const ingresos = hasHistoryMonth
-        ? monthEntries.reduce((s, [, dia]) => s + (dia.ventas?.reduce((a, v) => a + (+v[metodo] || 0), 0) || 0), 0)
-        : (mg.totV?.[metodo] || 0);
-      const egresos = hasHistoryMonth
-        ? monthEntries.reduce((s, [, dia]) => s + (dia.gastos?.filter(g => g.caja === metodo).reduce((a, g) => a + (+g.monto || 0), 0) || 0), 0)
-        : (mg.totG?.[metodo] || 0);
-      const computed = saldoInicial + ingresos - egresos;
-      if (hasHistoryMonth) return computed;
-      if (mg.saldoFinalPorMetodo?.[metodo] != null) return mg.saldoFinalPorMetodo[metodo];
-      return computed;
-    }
-
-    const prevMes = getUltimoMesAnteriorAll(mesesObj, historial, mesFiltro);
-    if (!prevMes) return 0;
-
-    const totV = Object.entries(historial || {}).filter(([f]) => f.startsWith(mesFiltro)).reduce((s, [, dia]) => s + (dia.ventas?.reduce((a, v) => a + (+v[metodo] || 0), 0) || 0), 0);
-    const totG = Object.entries(historial || {}).filter(([f]) => f.startsWith(mesFiltro)).reduce((s, [, dia]) => s + (dia.gastos?.filter(g => g.caja === metodo).reduce((a, g) => a + (+g.monto || 0), 0) || 0), 0);
-    const netMes = totV - totG;
-
-    const prevInitial = getSaldoFinalPorMetodoAll(mesesObj, historial, prevMes, metodo, _seen) || 0;
-    return prevInitial + netMes;
-  };
-
-  const getSaldoInicialPorMetodoAll = (mesesObj, historial, mesFiltro, metodo, _seen = new Set()) => {
-    const prevMes = getUltimoMesAnteriorAll(mesesObj, historial, mesFiltro);
-    if (!prevMes) return 0;
-    return getSaldoFinalPorMetodoAll(mesesObj, historial, prevMes, metodo, _seen);
-  };
-
-  const getSaldoFinalDelMesAll = (mesesObj, historial, mesFiltro, _seen = new Set()) => {
-    if (!mesFiltro) return 0;
-    if (_seen.has(mesFiltro)) return 0;
-    _seen.add(mesFiltro);
-    const mg = mesesObj?.[mesFiltro];
-    if (mg) {
-      if (mg.saldoFinal != null) return mg.saldoFinal;
-      if (mg.saldoFinalPorMetodo) return Object.values(mg.saldoFinalPorMetodo).reduce((a, v) => a + (v || 0), 0);
-      return METODOS.reduce((a, m) => a + getSaldoFinalPorMetodoAll(mesesObj, historial, mesFiltro, m.key, _seen), 0);
-    }
-    return METODOS.reduce((a, m) => a + (Object.entries(historial || {}).filter(([f]) => f.startsWith(mesFiltro)).reduce((s, [, dia]) => s + (dia.ventas?.reduce((x, v) => x + (+v[m.key] || 0), 0) || 0) - (dia.gastos?.filter(g => g.caja === m.key).reduce((x, g) => x + (+g.monto || 0), 0) || 0), 0)), 0);
-  };
-
-  const getSaldoInicialDelMesAnteriorAll = (mesesObj, historial, mesFiltro) => {
-    const prevMes = getUltimoMesAnteriorAll(mesesObj, historial, mesFiltro);
-    if (!prevMes) return 0;
-    return getSaldoFinalDelMesAll(mesesObj, historial, prevMes);
-  };
-
   const ViewMayor = () => {
     const fmtC = (n) => $(n || 0);
 
@@ -1022,8 +943,8 @@ const S = { // styles
         {/* RESUMEN EN TARJETAS */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className={`${S.card} px-4 py-3`}>
-            <div className="text-2xl font-bold text-emerald-400">{fmtC(granTotal)}</div>
-            <div className="text-gray-600 text-xs mt-1">{diaHoy.ventas?.length || 0} transacciones</div>
+            <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">?? INGRESOS</div>
+            <div className="text-2xl font-bold text-emerald-400">{fmtC(granTotal)}</div>\n            <div className="text-gray-600 text-xs mt-1">{diaHoy.ventas?.length || 0} transacciones</div>
           </div>
           
           <div className={`${S.card} px-4 py-3`}>
@@ -1069,7 +990,7 @@ const S = { // styles
               {METODOS.map(m => <col key={m.key} style={{ width: "64px" }} />)}
               <col style={{ width: "68px" }} />
             </colgroup>
- 
+
             {/* Encabezados */}
             <thead>
               <tr className="bg-gray-800/70 border-b border-gray-700">
@@ -2971,21 +2892,6 @@ const S = { // styles
                 onClick={()=>{
                   if (!filasVentas.length) return;
                   const nombreMes = new Date(mesFiltro+"-01T12:00:00").toLocaleDateString("es-CO",{month:"long",year:"numeric"});
-                  // Calcular saldos iniciales por método a partir del mes anterior
-                  const saldoInicialPorMetodo = Object.fromEntries(METODOS.map(m => [
-                    m.key,
-                    (typeof getSaldoInicialPorMetodoAll === 'function') ? (getSaldoInicialPorMetodoAll(mesesGuardados, historial, mesFiltro, m.key) || 0) : 0
-                  ]));
-
-                  // Calcular saldos finales por método para el mes actual
-                  const saldoFinalPorMetodo = Object.fromEntries(METODOS.map(m => [
-                    m.key,
-                    (saldoInicialPorMetodo[m.key] || 0) + (totV[m.key] || 0) - (totG[m.key] || 0)
-                  ]));
-
-                  const saldoInicial = Object.values(saldoInicialPorMetodo).reduce((a,b)=>a+(b||0),0);
-                  const saldoFinal = Object.values(saldoFinalPorMetodo).reduce((a,b)=>a+(b||0),0);
-
                   setMesesGuardados(mg=>({
                     ...mg,
                     [mesFiltro]: {
@@ -2998,10 +2904,6 @@ const S = { // styles
                       diasHistorial: Object.fromEntries(
                         Object.entries(historial).filter(([f])=>f.startsWith(mesFiltro))
                       ),
-                      saldoInicialPorMetodo,
-                      saldoFinalPorMetodo,
-                      saldoInicial,
-                      saldoFinal,
                     }
                   }));
                   setTab("historial");
@@ -3187,14 +3089,10 @@ const S = { // styles
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-blue-400">=</span></td>
                     {METODOS.map(m=>{
                       const n=(totV[m.key]||0)-(totG[m.key]||0);
-                      const inicialPorMetodo = (typeof getSaldoInicialPorMetodoAll === 'function')
-                        ? (getSaldoInicialPorMetodoAll(mesesGuardados, historial, mesFiltro, m.key) || 0)
-                        : 0;
-                      const valor = inicialPorMetodo + n;
                       return (
                         <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold"
-                          style={{fontSize:"10px",color:valor>0?"#93c5fd":valor<0?"#f87171":"#374151"}}>
-                          {fmtK(valor)}
+                          style={{fontSize:"10px",color:n>0?"#93c5fd":n<0?"#f87171":"#374151"}}>
+                          {n!==0?fmtK(n):"—"}
                         </td>
                       );
                     })}
@@ -3202,21 +3100,17 @@ const S = { // styles
                   </tr>
                   {/* Saldo del mes (única fila) */}
                   {(() => {
-                    const totalFinal = METODOS.reduce((a,m)=>{
-                      const n = (totV[m.key]||0)-(totG[m.key]||0);
-                      const inicialPorMetodo = (typeof getSaldoInicialPorMetodoAll === 'function')
-                        ? (getSaldoInicialPorMetodoAll(mesesGuardados, historial, mesFiltro, m.key) || 0)
-                        : 0;
-                      return a + inicialPorMetodo + n;
-                    }, 0);
+                    const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
+                    const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
+                    const saldoMes = totalIngr - totalEgr;
                     return (
                       <tr className="border-t border-blue-800/50 bg-blue-950/40">
                         <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
                           Saldo Total
                         </td>
                         <td colSpan={METODOS.length + 1} className="px-2 py-1 text-right font-mono font-bold"
-                          style={{fontSize:"11px", color: totalFinal>0?"#93c5fd":totalFinal<0?"#f87171":"#374151"}}>
-                          {fmtK(totalFinal)}
+                          style={{fontSize:"11px", color: saldoMes>0?"#93c5fd":saldoMes<0?"#f87171":"#374151"}}>
+                          {saldoMes!==0 ? fmtK(saldoMes) : "—"}
                         </td>
                       </tr>
                     );
