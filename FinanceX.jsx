@@ -2474,6 +2474,41 @@ const S = { // styles
     const diasSemana = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
     const [mesFiltro, setMesFiltro] = useState(todayStr().slice(0,7)); // "2025-03"
 
+    const saldoInicialPorMetodoMes = useMemo(() => {
+      const stored = mesesGuardados[mesFiltro]?.saldoInicialPorMetodo;
+      if (stored && typeof stored === 'object') {
+        return { ...stored };
+      }
+
+      const [year, month] = (mesFiltro || "").split("-").map(Number);
+      if (!year || !month) {
+        return Object.fromEntries(METODOS.map(m => [m.key, 0]));
+      }
+
+      const fechaPrev = new Date(year, month - 1, 1);
+      fechaPrev.setMonth(fechaPrev.getMonth() - 1);
+      const mesPrev = `${fechaPrev.getFullYear()}-${String(fechaPrev.getMonth() + 1).padStart(2, "0")}`;
+      let prevMes = mesesGuardados[mesPrev];
+
+      if (!prevMes) {
+        const mesesPrevios = Object.keys(mesesGuardados)
+          .filter(m => m < mesFiltro)
+          .sort();
+        const ultimoMesPrevio = mesesPrevios[mesesPrevios.length - 1];
+        prevMes = ultimoMesPrevio ? mesesGuardados[ultimoMesPrevio] : null;
+      }
+
+      if (prevMes?.saldoFinalPorMetodo && typeof prevMes.saldoFinalPorMetodo === 'object') {
+        return { ...prevMes.saldoFinalPorMetodo };
+      }
+
+      if (prevMes?.totV && prevMes?.totG) {
+        return Object.fromEntries(METODOS.map(m => [m.key, (prevMes.totV[m.key] || 0) - (prevMes.totG[m.key] || 0)]));
+      }
+
+      return Object.fromEntries(METODOS.map(m => [m.key, 0]));
+    }, [mesFiltro, mesesGuardados]);
+
     const filasVentas = useMemo(() => {
       return Object.keys(historial).filter(f=>f.startsWith(mesFiltro)).sort().flatMap(fecha => {
         const dia = historial[fecha];
@@ -2892,6 +2927,10 @@ const S = { // styles
                 onClick={()=>{
                   if (!filasVentas.length) return;
                   const nombreMes = new Date(mesFiltro+"-01T12:00:00").toLocaleDateString("es-CO",{month:"long",year:"numeric"});
+                  const saldoFinalPorMetodo = Object.fromEntries(METODOS.map(m => [
+                    m.key,
+                    (saldoInicialPorMetodoMes[m.key] || 0) + ((totV[m.key] || 0) - (totG[m.key] || 0))
+                  ]));
                   setMesesGuardados(mg=>({
                     ...mg,
                     [mesFiltro]: {
@@ -2901,6 +2940,8 @@ const S = { // styles
                       filas: filasVentas,
                       totV: {...totV},
                       totG: {...totG},
+                      saldoInicialPorMetodo: {...saldoInicialPorMetodoMes},
+                      saldoFinalPorMetodo,
                       diasHistorial: Object.fromEntries(
                         Object.entries(historial).filter(([f])=>f.startsWith(mesFiltro))
                       ),
@@ -3088,7 +3129,7 @@ const S = { // styles
                     <td className="border-r border-gray-700/50 px-1 py-1 text-white font-bold" style={{fontSize:"9px"}}>Total Saldo</td>
                     <td className="border-r border-gray-700/50 text-center" style={{fontSize:"9px"}}><span className="text-blue-400">=</span></td>
                     {METODOS.map(m=>{
-                      const n=(totV[m.key]||0)-(totG[m.key]||0);
+                      const n=(saldoInicialPorMetodoMes[m.key]||0) + (totV[m.key]||0) - (totG[m.key]||0);
                       return (
                         <td key={m.key} className="border-r border-gray-700/40 last:border-r-0 text-center font-mono font-bold"
                           style={{fontSize:"10px",color:n>0?"#93c5fd":n<0?"#f87171":"#374151"}}>
@@ -3100,9 +3141,7 @@ const S = { // styles
                   </tr>
                   {/* Saldo del mes (única fila) */}
                   {(() => {
-                    const totalIngr = METODOS.reduce((a,m)=>a+(totV[m.key]||0),0);
-                    const totalEgr  = METODOS.reduce((a,m)=>a+(totG[m.key]||0),0);
-                    const saldoMes = totalIngr - totalEgr;
+                    const saldoMes = METODOS.reduce((a,m)=>a + (saldoInicialPorMetodoMes[m.key]||0) + (totV[m.key]||0) - (totG[m.key]||0), 0);
                     return (
                       <tr className="border-t border-blue-800/50 bg-blue-950/40">
                         <td colSpan={2} className="border-r border-gray-700/50 px-1 py-1 text-blue-300 font-bold" style={{fontSize:"9px"}}>
